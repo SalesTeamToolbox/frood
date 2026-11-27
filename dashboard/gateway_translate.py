@@ -56,6 +56,18 @@ def _openai_image_url_part(block: dict[str, Any]) -> dict[str, Any]:
     return {"type": "image_url", "image_url": {"url": url}}
 
 
+def _tool_result_call_ids(content: Any) -> set[str]:
+    """tool_call_id values from ``tool_result`` blocks in a user message content."""
+    ids: set[str] = set()
+    if isinstance(content, list):
+        for b in content:
+            if isinstance(b, dict) and b.get("type") == "tool_result":
+                tid = b.get("tool_call_id")
+                if tid:
+                    ids.add(tid)
+    return ids
+
+
 def anthropic_to_openai(
     body: dict[str, Any], upstream_model: str
 ) -> tuple[dict[str, Any], list[str]]:
@@ -88,7 +100,8 @@ def anthropic_to_openai(
         openai_messages.append({"role": "system", "content": system_text})
 
     # --- messages ---
-    for msg in body.get("messages", []) or []:
+    messages = body.get("messages", []) or []
+    for i, msg in enumerate(messages):
         role = msg.get("role")
         content = msg.get("content")
 
@@ -100,6 +113,8 @@ def anthropic_to_openai(
 
             if isinstance(content, list):
                 for b in content:
+                    if not isinstance(b, dict):
+                        continue
                     btype = b.get("type")
                     if btype == "text":
                         text_parts.append(b.get("text", ""))
@@ -118,7 +133,11 @@ def anthropic_to_openai(
                                 },
                             }
                         )
-                    if isinstance(b, dict) and b.get("cache_control"):
+                    else:
+                        bt = b.get("type")
+                        if isinstance(bt, str):
+                            _drop_once(warnings, f"block_dropped:{bt}")
+                    if b.get("cache_control"):
                         _drop_once(warnings, "cache_control_dropped")
 
             if tool_calls:
@@ -133,6 +152,8 @@ def anthropic_to_openai(
                     parts: list[dict[str, Any]] = []
                     if isinstance(content, list):
                         for b in content:
+                            if not isinstance(b, dict):
+                                continue
                             btype = b.get("type")
                             if btype == "text":
                                 parts.append({"type": "text", "text": b.get("text", "")})
@@ -143,6 +164,27 @@ def anthropic_to_openai(
                     oai_msg["content"] = "\n\n".join(text_parts) if text_parts else ""
 
             openai_messages.append(oai_msg)
+
+            # Orphaned tool_use: an assistant tool_call id with no matching
+            # tool_result in the next user message gets a synthetic tool
+            # message right after the assistant message, plus a warning.
+            if tool_calls:
+                result_ids: set[str] = set()
+                if i + 1 < len(messages):
+                    nxt = messages[i + 1]
+                    if nxt.get("role") == "user":
+                        result_ids = _tool_result_call_ids(nxt.get("content"))
+                for tc in tool_calls:
+                    tc_id = tc.get("id", "")
+                    if tc_id and tc_id not in result_ids:
+                        openai_messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc_id,
+                                "content": "[no result: interrupted]",
+                            }
+                        )
+                        _drop_once(warnings, "orphan_tool_use")
 
         elif role == "user":
             if isinstance(content, list):
@@ -185,7 +227,11 @@ def anthropic_to_openai(
                         parts.append(_openai_image_url_part(b))
                     elif btype == "thinking" or btype == "redacted_thinking":
                         _drop_once(warnings, "thinking_dropped")
-                    if isinstance(b, dict) and b.get("cache_control"):
+                    else:
+                        bt = b.get("type")
+                        if isinstance(bt, str):
+                            _drop_once(warnings, f"block_dropped:{bt}")
+                    if b.get("cache_control"):
                         _drop_once(warnings, "cache_control_dropped")
 
                 if has_image:
@@ -214,6 +260,8 @@ def anthropic_to_openai(
         if not t.get("input_schema"):
             _drop_once(warnings, "server_tool_dropped")
             continue
+        if isinstance(t, dict) and t.get("cache_control"):
+            _drop_once(warnings, "cache_control_dropped")
         openai_tools.append(
             {
                 "type": "function",
@@ -250,6 +298,9 @@ def anthropic_to_openai(
         openai_body["tools"] = oai_body_tools
     openai_body["tool_choice"] = oai_tool_choice
 
+    if isinstance(tool_choice, dict) and tool_choice.get("disable_parallel_tool_use"):
+        openai_body["parallel_tool_calls"] = False
+
     if body.get("max_tokens") is not None:
         openai_body["max_tokens"] = body.get("max_tokens")
     if body.get("temperature") is not None:
@@ -258,14 +309,27 @@ def anthropic_to_openai(
         openai_body["top_p"] = body.get("top_p")
     if body.get("stop_sequences") is not None:
         openai_body["stop"] = body.get("stop_sequences")
-    if body.get("stream"):
-        openai_body["stream"] = True
-        openai_body["stream_options"] = {"include_usage": True}
+    if "stream" in body:
+        openai_body["stream"] = bool(body.get("stream"))
+        if body.get("stream"):
+            openai_body["stream_options"] = {"include_usage": True}
 
-    # Dropped unknown params with warning.
-    for key in ("metadata", "thinking", "top_k", "context_management"):
-        if key in body:
-            warnings.append(f"param_dropped:{key}")
+    # Consumed request keys; anything else present is dropped with a warning.
+    _CONSUMED_KEYS = {
+        "model",
+        "system",
+        "messages",
+        "tools",
+        "tool_choice",
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "stop_sequences",
+        "stream",
+    }
+    for key in body:
+        if key not in _CONSUMED_KEYS:
+            _drop_once(warnings, f"param_dropped:{key}")
 
     return openai_body, warnings
 
@@ -302,11 +366,12 @@ def openai_to_anthropic(resp: dict[str, Any], requested_model: str) -> dict[str,
         for tc in tool_calls:
             fn = tc.get("function") or {}
             args_raw = fn.get("arguments", "")
-            args: Any
-            if isinstance(args_raw, str):
-                args = _safe_json_loads(args_raw)
-                if args is None:
-                    args = {"_raw": args_raw}
+            # Empty or whitespace-only arguments ⇒ {} (non-streaming too), not _raw.
+            if isinstance(args_raw, str) and not args_raw.strip():
+                args = {}
+            elif isinstance(args_raw, str):
+                parsed = _safe_json_loads(args_raw)
+                args = {"_raw": args_raw} if parsed is None else parsed
             elif isinstance(args_raw, dict):
                 args = args_raw
             else:
@@ -367,6 +432,9 @@ def openai_error_to_anthropic(status: int, body: bytes) -> dict[str, Any]:
         elif isinstance(err, str):
             message = err
         else:
+            message = body.decode("utf-8", "replace")
+        # error.message missing or empty ⇒ fall back to the raw body.
+        if not message:
             message = body.decode("utf-8", "replace")
     except (ValueError, UnicodeDecodeError):
         message = body.decode("utf-8", "replace")
@@ -478,6 +546,8 @@ class StreamTranslator:
     # -- SSE line processing -------------------------------------------
 
     def _process_line(self, line: bytes) -> None:
+        if self._errored:
+            return  # nothing after an error, even within one feed() call
         text = line.decode("utf-8", "replace").rstrip("\r")
         if not text:
             return
@@ -505,6 +575,8 @@ class StreamTranslator:
         self._process_chunk(data)
 
     def _process_chunk(self, data: dict[str, Any]) -> None:
+        if self._errored:
+            return
         usage = data.get("usage")
         if isinstance(usage, dict):
             self._usage["input_tokens"] = usage.get("prompt_tokens") or 0

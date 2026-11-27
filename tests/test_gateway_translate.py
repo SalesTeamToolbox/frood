@@ -46,17 +46,25 @@ def _feed_all(translator: StreamTranslator, data: bytes) -> bytes:
     return out
 
 
-def _stream_case(sse_name: str, golden_name: str) -> None:
-    """Feed a fixture whole and in 7-byte chunks; both must equal the golden."""
+def _stream_case(sse_name: str, golden_name: str, finish: bool = False) -> None:
+    """Feed a fixture whole and in 7-byte chunks; both must equal the golden.
+
+    When ``finish`` is True, ``finish()`` is called after the feed so closing
+    events (e.g. for an upstream that ends without ``[DONE]``) are included.
+    """
     sse = _load(sse_name).encode("utf-8")
     golden = _load(golden_name)
 
     tr = StreamTranslator("test-model")
     whole = tr.feed(sse)
+    if finish:
+        whole = whole + tr.finish()
     assert _eq(whole, golden), (sse_name, "whole")
 
     tr2 = StreamTranslator("test-model")
     chunked = _feed_all(tr2, sse)
+    if finish:
+        chunked = chunked + tr2.finish()
     assert _eq(chunked, golden), (sse_name, "chunked")
     assert _norm(whole.decode()) == _norm(chunked.decode()), (sse_name, "whole == chunked")
 
@@ -139,6 +147,116 @@ def test_anthropic_to_openai_request_golden():
     ]
 
 
+def test_disable_parallel_tool_use():
+    """#1: tool_choice dict with disable_parallel_tool_use -> parallel_tool_calls: false."""
+    body = {
+        "messages": [{"role": "user", "content": "hi"}],
+        "tools": [
+            {
+                "name": "fn",
+                "description": "d",
+                "input_schema": {"type": "object"},
+            }
+        ],
+        "tool_choice": {"type": "tool", "name": "fn", "disable_parallel_tool_use": True},
+    }
+    openai_body, warnings = anthropic_to_openai(body, "m")
+    assert openai_body["parallel_tool_calls"] is False
+    assert openai_body["tool_choice"] == {"type": "function", "function": {"name": "fn"}}
+
+
+def test_unknown_param_warning():
+    """#7: any unknown request key is dropped with param_dropped:<key>."""
+    body = {
+        "messages": [{"role": "user", "content": "hi"}],
+        "foo": 1,
+        "bar": {"x": 2},
+    }
+    _, warnings = anthropic_to_openai(body, "m")
+    assert "param_dropped:foo" in warnings
+    assert "param_dropped:bar" in warnings
+
+
+def test_stream_false_copied():
+    """#8: stream: false is copied into the OpenAI body."""
+    body = {"messages": [{"role": "user", "content": "hi"}], "stream": False}
+    openai_body, _ = anthropic_to_openai(body, "m")
+    assert openai_body["stream"] is False
+    assert "stream_options" not in openai_body
+
+
+def test_block_dropped_warning():
+    """#4: unknown request block types are dropped with block_dropped:<type>."""
+    body = {
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "document", "source": {"type": "base64", "data": "x"}},
+                    {"type": "search_result", "text": "s"},
+                    {"type": "text", "text": "hello"},
+                ],
+            }
+        ],
+    }
+    _, warnings = anthropic_to_openai(body, "m")
+    assert "block_dropped:document" in warnings
+    assert "block_dropped:search_result" in warnings
+
+
+def test_cache_control_dropped_in_tools():
+    """#10: cache_control inside a tools[] entry warns cache_control_dropped once."""
+    body = {
+        "messages": [{"role": "user", "content": "hi"}],
+        "tools": [
+            {
+                "name": "fn",
+                "description": "d",
+                "input_schema": {"type": "object"},
+                "cache_control": {"type": "ephemeral"},
+            }
+        ],
+    }
+    openai_body, warnings = anthropic_to_openai(body, "m")
+    assert "cache_control_dropped" in warnings
+    # The tool still has input_schema so it is kept.
+    assert len(openai_body["tools"]) == 1
+
+
+def test_orphan_tool_use():
+    """#2: assistant tool_use with no tool_result in next user message -> synthetic tool + warning."""
+    body = {
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "I'll call a tool"},
+                    {"type": "tool_use", "id": "toolu_x", "name": "fn", "input": {}},
+                ],
+            },
+            {"role": "user", "content": "next turn"},
+        ],
+    }
+    openai_body, warnings = anthropic_to_openai(body, "m")
+    msgs = openai_body["messages"]
+    assert msgs == [
+        {
+            "role": "assistant",
+            "content": "I'll call a tool",
+            "tool_calls": [
+                {
+                    "id": "toolu_x",
+                    "type": "function",
+                    "function": {"name": "fn", "arguments": "{}"},
+                },
+            ],
+        },
+        {"role": "tool", "tool_call_id": "toolu_x", "content": "[no result: interrupted]"},
+        {"role": "user", "content": "next turn"},
+    ]
+    assert "orphan_tool_use" in warnings
+
+
 def test_tool_result_ordering():
     """G2: [tool_result A, tool_result B, text] -> tool A, tool B, then user text."""
     body = {
@@ -188,25 +306,27 @@ def test_stream_two_parallel_tools():
 
 
 def test_stream_midstream_error():
-    """G6: mid-stream error -> open block closed, then error, nothing after."""
+    """G6: mid-stream error -> open block closed, then error, nothing after.
+
+    The error case is fed whole, in 7-byte chunks, and with a trailing data
+    line in the same feed (nothing may be emitted after the error event).
+    """
+    _stream_case("stream_error.sse", "stream_error.golden")
+    # Trailing data in the same feed after the error must produce nothing.
     sse = _load("stream_error.sse").encode("utf-8")
-    golden = _load("stream_error.golden")
     tr = StreamTranslator("test-model")
-    whole = tr.feed(sse)
-    assert _eq(whole, golden)
-    # Nothing after the error, even with more input.
-    assert tr.feed(b"data: [DONE]\n\n") == b""
+    tr.feed(sse)
+    assert tr.feed(b'data: {"choices":[{"delta":{"content":"AFTER"}}]}\n\n') == b""
 
 
 def test_stream_no_done():
     """G7: upstream ends without [DONE] -> finish() emits message_delta + message_stop."""
-    sse = _load("stream_nodone.sse").encode("utf-8")
-    golden = _load("stream_nodone.golden")
+    _stream_case("stream_nodone.sse", "stream_nodone.golden", finish=True)
     tr = StreamTranslator("test-model")
-    part = tr.feed(sse)
-    closing = tr.finish()
-    assert _eq(part + closing, golden)
-    # finish() after completion is idempotent/no-op.
+    sse = _load("stream_nodone.sse").encode("utf-8")
+    out = tr.feed(sse) + tr.finish()
+    assert _eq(out, _load("stream_nodone.golden"))
+    # A second finish() on the same translator is a no-op (already finished).
     assert tr.finish() == b""
 
 
@@ -300,6 +420,30 @@ def test_openai_to_anthropic_empty_content_no_tools():
     assert result["content"] == []
 
 
+def test_openai_to_anthropic_empty_args_becomes_dict():
+    """G3 finding: empty/whitespace-only tool arguments -> {}, not {"_raw": ...}."""
+    resp = {
+        "id": "x",
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "t",
+                    "tool_calls": [
+                        {"id": "c1", "function": {"name": "fn", "arguments": ""}},
+                        {"id": "c2", "function": {"name": "fn2", "arguments": "   "}},
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
+        "usage": {},
+    }
+    result = openai_to_anthropic(resp, "req")
+    inputs = [b["input"] for b in result["content"] if b["type"] == "tool_use"]
+    assert inputs == [{}, {}]
+
+
 def test_openai_to_anthropic_finish_reason_map():
     cases = [
         ("stop", "end_turn"),
@@ -330,6 +474,13 @@ def test_openai_error_to_anthropic_429():
         "type": "error",
         "error": {"type": "rate_limit_error", "message": "rate limited"},
     }
+
+
+def test_openai_error_to_anthropic_missing_message():
+    """G6 finding: error object without message falls back to the raw body."""
+    err = openai_error_to_anthropic(500, b'{"error":{"type":"x"}}')
+    assert err["error"]["type"] == "api_error"
+    assert err["error"]["message"] == '{"error":{"type":"x"}}'
 
 
 def test_openai_error_to_anthropic_non_json_502():
