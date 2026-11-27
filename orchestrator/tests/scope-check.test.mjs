@@ -152,3 +152,71 @@ test("checkScope: an unresolvable baseRef falls back to the ticket base", () => 
   assert.equal(r.from, base);
   assert.deepEqual(r.outOfScope, ["README.md"]);
 });
+
+// A repo whose local `main` is ahead of `origin/main`: origin is a bare repo local main was once
+// pushed to, then advanced without pushing, so origin/main lags the ticket base.
+function mkWithOrigin() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "orch-scope-origin-"));
+  CLEAN.push(root);
+  const bare = path.join(root, "origin.git");
+  fs.mkdirSync(bare, { recursive: true });
+  git(bare, "init", "--bare");
+  const repo = path.join(root, "repo");
+  fs.mkdirSync(repo, { recursive: true });
+  git(repo, "init", "-b", "main");
+  git(repo, "config", "user.email", "scope@example.test");
+  git(repo, "config", "user.name", "scope test");
+  git(repo, "config", "commit.gpgsign", "false");
+  git(repo, "remote", "add", "origin", bare);
+  commit(repo, { "bin/a.mjs": "a\n" }, "c0");
+  git(repo, "push", "-u", "origin", "main"); // origin/main = c0, local main advances from here
+  return { root, repo, bare };
+}
+
+test("checkScope: origin/main lags but local main advanced → diffs from the local-main merge-base", () => {
+  const { repo } = mkWithOrigin();
+  const base = commit(repo, { "bin/a.mjs": "base\n" }, "ticket base"); // local main ahead of origin/main
+  git(repo, "checkout", "-q", "-b", "work");
+  commit(repo, { "bin/a.mjs": "a2\n" }, "in scope on work");
+  git(repo, "checkout", "-q", "main");
+  commit(repo, { "other/x.mjs": "another ticket\n" }, "another ticket on local main");
+  git(repo, "checkout", "-q", "work");
+  git(repo, "rebase", "-q", "main");
+  const sha = git(repo, "rev-parse", "HEAD");
+  const main = git(repo, "rev-parse", "main");
+  const r = checkScope({ repo, base, sha, scope: ["bin/**"], baseRef: "origin/main" });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.from, main, "from is the local-main merge-base");
+  assert.deepEqual(r.outOfScope, []);
+  assert.deepEqual(r.denied, []);
+});
+
+test("checkScope: rebased onto local main, out-of-scope and denied files on the branch are still caught", () => {
+  const { repo } = mkWithOrigin();
+  const base = commit(repo, { "bin/a.mjs": "base\n" }, "ticket base");
+  git(repo, "checkout", "-q", "-b", "work");
+  commit(repo, { "bin/a.mjs": "a2\n", "README.md": "out of scope\n", ".claude/plans/x.md": "plan\n" }, "work commit");
+  git(repo, "checkout", "-q", "main");
+  commit(repo, { "other/x.mjs": "another ticket\n" }, "another ticket on local main");
+  git(repo, "checkout", "-q", "work");
+  git(repo, "rebase", "-q", "main");
+  const sha = git(repo, "rev-parse", "HEAD");
+  const main = git(repo, "rev-parse", "main");
+  const r = checkScope({ repo, base, sha, scope: ["bin/**"], baseRef: "origin/main" });
+  assert.equal(r.ok, false, JSON.stringify(r));
+  assert.equal(r.from, main, "from is still the local-main merge-base");
+  assert.ok(r.outOfScope.includes("README.md"), JSON.stringify(r.outOfScope));
+  assert.ok(r.denied.includes(".claude/plans/x.md"), JSON.stringify(r.denied));
+});
+
+test("checkScope: work merged into local main (M == sha) falls back to base", () => {
+  const { repo } = mkWithOrigin();
+  const base = commit(repo, { "bin/a.mjs": "base\n" }, "ticket base");
+  git(repo, "checkout", "-q", "-b", "work");
+  const sha = commit(repo, { "bin/a.mjs": "a2\n", "README.md": "out of scope\n" }, "work commit");
+  git(repo, "checkout", "-q", "main");
+  git(repo, "merge", "-q", "--ff", "work"); // local main = work head == sha
+  const r = checkScope({ repo, base, sha, scope: ["bin/**"], baseRef: "origin/main" });
+  assert.equal(r.from, base, "M == sha is rejected, so diff from the ticket base");
+  assert.ok(r.outOfScope.includes("README.md"), JSON.stringify(r.outOfScope));
+});

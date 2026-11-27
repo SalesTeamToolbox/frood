@@ -38,19 +38,50 @@ function git(repo, args) {
 }
 
 // The commit to diff from. `base` is the ticket's base_sha, which is not refreshed when the branch is rebased.
-// With `baseRef` (the adapter's base ref, e.g. origin/main), let M = merge-base(baseRef, sha):
-// - when `base` is an ancestor of M, the branch was rebased onto a newer base, so diff from M — otherwise
-//   every file main changed since `base` would read as out of scope;
-// - otherwise (baseRef lags the ticket base, e.g. an unpushed local main) diff from `base`.
+// With `baseRef` (the adapter's base ref, e.g. origin/main), the fence also considers its local branch
+// counterpart: when baseRef names a remote-tracking ref <remote>/<branch> and refs/remotes/<baseRef> resolves,
+// refs/heads/<branch> is a candidate too. For each candidate ref that resolves, let M = merge-base(ref, sha):
+// - a candidate is accepted only when base is an ancestor of M and M != sha (a branch already merged into the
+//   ref would give an empty diff and a vacuous pass);
+// - diff from the newest accepted M (when both are accepted, the one the other is an ancestor of);
+// - with none accepted, diff from `base` exactly as before.
+// So a branch rebased onto a local main that is ahead of origin/main diffs from the local-main merge-base
+// instead of the stale base_sha; a baseRef that lags the ticket base still falls back to `base`.
 // A missing or unresolvable baseRef, or a failed merge-base, diffs from `base` as before.
+// All git calls keep the existing timeout via the shared `git()` helper.
+function isAncestor(repo, a, b) {
+  const anc = git(repo, ["merge-base", "--is-ancestor", a, b]);
+  return !anc.error && anc.status === 0;
+}
+function mergeBase(repo, ref, sha) {
+  const mb = git(repo, ["merge-base", ref, sha]);
+  if (mb.error || mb.status !== 0) return null;
+  const m = String(mb.stdout || "").trim();
+  return m || null;
+}
 function diffFrom(repo, base, sha, baseRef) {
   if (!baseRef) return base;
-  const mb = git(repo, ["merge-base", baseRef, sha]);
-  if (mb.error || mb.status !== 0) return base;
-  const m = String(mb.stdout || "").trim();
-  if (!m) return base;
-  const anc = git(repo, ["merge-base", "--is-ancestor", base, m]);
-  return !anc.error && anc.status === 0 ? m : base;
+  // Candidate refs: baseRef itself, plus its local branch counterpart when baseRef is a remote-tracking ref
+  // (<remote>/<branch>) that resolves under refs/remotes/.
+  const refs = [baseRef];
+  const slash = baseRef.indexOf("/");
+  if (slash > 0) {
+    const branch = baseRef.slice(slash + 1);
+    const remoteRev = git(repo, ["rev-parse", "--verify", `refs/remotes/${baseRef}`]);
+    if (!remoteRev.error && remoteRev.status === 0) {
+      const localRev = git(repo, ["rev-parse", "--verify", `refs/heads/${branch}`]);
+      if (!localRev.error && localRev.status === 0) refs.push(branch);
+    }
+  }
+  let from = base;
+  for (const ref of refs) {
+    const m = mergeBase(repo, ref, sha);
+    if (!m || m === sha) continue; // merged into the ref: empty diff would be a vacuous pass
+    if (!isAncestor(repo, base, m)) continue; // base not an ancestor of M: stale, keep base
+    // Accept the newest: the one the current `from` is an ancestor of.
+    if (from === base || isAncestor(repo, from, m)) from = m;
+  }
+  return from;
 }
 
 // A deleted or renamed file counts by its old and new paths: `--no-renames`

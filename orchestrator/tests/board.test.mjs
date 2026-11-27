@@ -871,6 +871,16 @@ function commitFile(c, rel, content, msg = `add ${rel}`) {
   git(c.wt, "commit", "-m", msg);
   return head(c);
 }
+// Commit on a branch in the bare repo itself (the main worktree), e.g. to advance local main
+// ahead of origin/main while the ticket's worktree stays on its feature branch.
+function commitInRepo(c, rel, content, msg = `add ${rel}`) {
+  const p = path.join(c.repo, rel);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, content);
+  git(c.repo, "add", rel);
+  git(c.repo, "commit", "-m", msg);
+  return git(c.repo, "rev-parse", "HEAD");
+}
 // Ready rule 6: bin/load.test.mjs is the fixture Mandate's only blast-radius entry whose expectation changed.
 function landBlastFile(c) {
   return commitFile(c, "bin/load.test.mjs", "// fixture: the load() caller test\n");
@@ -2087,6 +2097,38 @@ test("scope ready: refuses a ticket whose signed-off sha leaves the scope", () =
   const rd = board(c, "ready", "sready", "--owner", "s1");
   assert.equal(rd.status, 1, rd.stderr);
   assert.match(rd.stderr, /out of scope: README.md/);
+});
+
+test("scope round: rebased onto a local main ahead of origin/main records APPROVED, not scope CHANGES_REQUESTED", () => {
+  const c = mk();
+  // origin/main exists at C0; local main advances ahead of it without pushing (adapter base = origin/main).
+  const bare = path.join(c.root, "origin.git");
+  fs.mkdirSync(bare, { recursive: true });
+  git(bare, "init", "--bare");
+  git(c.repo, "remote", "add", "origin", bare);
+  git(c.repo, "push", "-u", "origin", "main");
+  const adapter = path.join(c.repo, ".opencode", "board", "adapter.json");
+  const a = JSON.parse(fs.readFileSync(adapter, "utf8"));
+  a.base = "origin/main";
+  fs.writeFileSync(adapter, JSON.stringify(a, null, 2) + "\n");
+
+  created(c, "srebase", "--scope", "bin/**");
+  waived(c, "srebase");
+  assert.equal(claim(c, "srebase").status, 0, "claim sets base_sha to origin/main");
+  const base = head(c); // == origin/main == the ticket's base_sha
+  // An in-scope change on the work branch, then local main advances with another ticket's file.
+  commitFile(c, "bin/demo.mjs", "// in scope\n", "in scope on work");
+  git(c.repo, "checkout", "-q", "main");
+  commitInRepo(c, "other/x.mjs", "// another ticket\n", "another ticket on local main");
+  git(c.wt, "rebase", "-q", "main");
+  const sha = head(c); // rebased head: merge-base(main, sha) == main, a descendant of base_sha
+  const r = round(c, "srebase", { reviewed: sha });
+  assert.equal(r.status, 0, r.stderr);
+  const ro = r.ticket.rounds[0];
+  assert.equal(ro.counted, true);
+  assert.equal(ro.critic.critic_verdict, "APPROVED", "the critic did approve");
+  assert.equal(ro.critic.effective, "APPROVED", "the fence diffed from the local-main merge-base, not the stale base_sha");
+  assert.ok(!ro.critic.reasons.some((x) => x.startsWith("out of scope:")), JSON.stringify(ro.critic.reasons));
 });
 
 // ---------------------------------------------------------------- scope normalisation + `scope` amend (ws-guard-followups)
