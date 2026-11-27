@@ -1,4 +1,4 @@
-// Go subscription pace model (go-pacing G4a). Pure functions over the G2 ledger (go_v2 shape) and the
+// Go subscription pace model (go-pacing G4a, G3a fixes). Pure functions over the G2 ledger (go_v2 shape) and the
 // G3 snapshot shape; no file, network, env or clock access — every input is a parameter. G4b adds the CLI
 // and receipts; G5b wires routing. Nothing calls this yet.
 //
@@ -9,6 +9,12 @@
 //   before a snapshot reset; fiveHourWindow(times, now) is the fixed 5 h window containing now (a window
 //   opens at the first used time after the previous one closed); sumUsd(rows, from, to) sums window spend.
 //   reserve(H, span, cfg) is the over-ceiling reserve in cap-points, linear from reserve_pct to 0.
+//   Allowance mismatch (rule 2) tolerates integer snapshot percents: the ledger is compared against
+//   1.10 * (pct + 1)/100 * C_w (G0 percents are integers of the allowance). The fresh snapshot's `rolling`
+//   meter feeds used_5h (pct/100 * C_5h + ledger since at) and resets["5h"] while its resets_at is future;
+//   otherwise used_5h and resets["5h"] come from the ledger 5 h window. Rule 2 treats a null ledger or a
+//   ledger without an array `rows` as no ledger. weekBounds, periodBounds, periodFromReset and
+//   fiveHourWindow (and any helper taking an ms time) return null when Math.abs(t) > 8.64e15.
 //   goPaceState({cfg, ledger, snapshots, health, now, prev, noPace}) is the state (first match wins):
 //   off -> unknown -> over (go quota mark) -> over (5h burst) -> over (reserve) -> on (early period)
 //   -> over (projected) -> under (hysteresis) -> on.
@@ -32,6 +38,7 @@ const HOUR = 3600 * 1000;
 const DAY = 24 * HOUR;
 const WEEK = 7 * DAY;
 const FIVE_H = 5 * HOUR;
+const MAX_TIME = 8.64e15;
 
 // Config table defaults. monthly_usd falls back to top-level go_monthly_usd, else 60.
 export const GO_DEFAULTS = Object.freeze({
@@ -110,9 +117,9 @@ function asConfig(cfg) {
   };
 }
 
-/** Monday 00:00:00.000 UTC on or before now, plus 7 days. Null for non-finite now. */
+/** Monday 00:00:00.000 UTC on or before now, plus 7 days. Null for non-finite or out-of-range now. */
 export function weekBounds(now) {
-  if (!Number.isFinite(now)) return null;
+  if (!Number.isFinite(now) || Math.abs(now) > MAX_TIME) return null;
   const d = new Date(now);
   const daysSinceMonday = (d.getUTCDay() + 6) % 7;
   const start = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - daysSinceMonday);
@@ -125,10 +132,10 @@ const daysInMonth = (y, m) => new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
  * The paid period containing now, stepping calendar months from the anchor. Each boundary uses the
  * anchor's day-of-month clamped to that month's last day and the anchor's UTC time of day (anchor
  * 2026-01-31T00:00Z gives boundaries Feb 28, Mar 31, Apr 30, ...). Steps backwards for now < anchor.
- * Returns null for a missing or unparsable anchor, or a non-finite now.
+ * Returns null for a missing or unparsable anchor, a non-finite now, or |now| > 8.64e15.
  */
 export function periodBounds(anchor, now) {
-  if (typeof anchor !== "string" || !Number.isFinite(now)) return null;
+  if (typeof anchor !== "string" || !Number.isFinite(now) || Math.abs(now) > MAX_TIME) return null;
   const a = new Date(Date.parse(anchor));
   if (!Number.isFinite(a.getTime())) return null;
   const day = a.getUTCDate();
@@ -163,7 +170,7 @@ export function periodBounds(anchor, now) {
 
 /** The month before a snapshot's monthly reset: same day clamped to that month, same UTC time. */
 export function periodFromReset(resetMs) {
-  if (!Number.isFinite(resetMs)) return null;
+  if (!Number.isFinite(resetMs) || Math.abs(resetMs) > MAX_TIME) return null;
   const r = new Date(resetMs);
   const py = r.getUTCMonth() === 0 ? r.getUTCFullYear() - 1 : r.getUTCFullYear();
   const pm = r.getUTCMonth() === 0 ? 11 : r.getUTCMonth() - 1;
@@ -184,8 +191,10 @@ export function periodFromReset(resetMs) {
  * previous window's end and lasts 5 h (times 10:00, 14:00, 15:30 give 10:00-15:00 and 15:30-20:30).
  */
 export function fiveHourWindow(times, now) {
-  if (!Number.isFinite(now)) return null;
-  const sorted = (Array.isArray(times) ? times : []).filter(Number.isFinite).sort((a, b) => a - b);
+  if (!Number.isFinite(now) || Math.abs(now) > MAX_TIME) return null;
+  const sorted = (Array.isArray(times) ? times : [])
+    .filter((t) => Number.isFinite(t) && Math.abs(t) <= MAX_TIME)
+    .sort((a, b) => a - b);
   let prevEnd = -Infinity;
   for (const t of sorted) {
     if (t > now) break;
@@ -218,7 +227,14 @@ export function reserve(H, span, cfg) {
 }
 
 const round1 = (v) => (Number.isFinite(v) ? Math.round(v * 10) / 10 : null);
-const isoOrNull = (t) => (Number.isFinite(t) ? new Date(t).toISOString() : null);
+const isoOrNull = (t) => {
+  if (!Number.isFinite(t) || Math.abs(t) > MAX_TIME) return null;
+  try {
+    return new Date(t).toISOString();
+  } catch {
+    return null;
+  }
+};
 
 /**
  * Pure Go pace state. cfg: goConfig() output (raw limits with a `go` block also accepted). ledger:
@@ -235,9 +251,17 @@ export function goPaceState({ cfg, ledger, snapshots = [], health = {}, now, pre
   const pwk = (x) => (100 * x) / C_wk;
   const pmo = (x) => (100 * x) / C_mo;
   const rows = ledger && typeof ledger === "object" && Array.isArray(ledger.rows) ? ledger.rows : [];
+  const hasLedger = ledger != null && Array.isArray(ledger.rows);
   const unrated = Number.isFinite(ledger?.unrated) ? ledger.unrated : 0;
   const mode = c.pace.mode;
-  const at = Number.isFinite(now) ? new Date(now).toISOString() : null;
+  const at = (() => {
+    if (!Number.isFinite(now) || Math.abs(now) > MAX_TIME) return null;
+    try {
+      return new Date(now).toISOString();
+    } catch {
+      return null;
+    }
+  })();
 
   const nullResets = { "5h": null, wk: null, mo: null };
   const blank = (state, reason, extra = {}) => ({
@@ -291,16 +315,15 @@ export function goPaceState({ cfg, ledger, snapshots = [], health = {}, now, pre
 
   // wk bounds: always the Monday week; a fresh weekly resets_at replaces the end only.
   const wk = weekBounds(now);
-  if (wk === null) return blank("unknown", "no period"); // non-finite now: no window resolves
+  if (wk === null) return blank("unknown", "no period"); // non-finite/out-of-range now: no window resolves
   const snapWkReset = Number.isFinite(Date.parse(fresh?.weekly?.resets_at)) ? Date.parse(fresh.weekly.resets_at) : NaN;
   if (Number.isFinite(snapWkReset) && snapWkReset > now) wk.end = snapWkReset;
 
-  // 5h always from the ledger, over the times of rows with usd > 0.
+  // 5h from the fresh rolling meter while its reset is future, else the ledger window.
   const w5 = fiveHourWindow(
     rows.filter((r) => r && typeof r === "object" && Number.isFinite(r.usd) && r.usd > 0).map((r) => r.t),
     now,
   );
-  const used5h = w5 ? sumUsd(rows, w5.start, now) : 0;
 
   // Per-window spend: fresh snapshot meter + ledger delta since the snapshot, else ledger from the start.
   const meter = (w) =>
@@ -309,15 +332,18 @@ export function goPaceState({ cfg, ledger, snapshots = [], health = {}, now, pre
       : null;
   const mwk = meter("weekly");
   const mmo = meter("monthly");
+  const mroll = meter("rolling");
   const useSnapWk = mwk && Number.isFinite(mwk.reset) && mwk.reset > now;
   const useSnapMo = mmo && Number.isFinite(mmo.reset) && mmo.reset > now && mo !== null;
+  const useSnap5h = mroll && Number.isFinite(mroll.reset) && mroll.reset > now;
+  const used5h = useSnap5h ? (mroll.pct / 100) * C_5h + sumUsd(rows, snapAt, now) : w5 ? sumUsd(rows, w5.start, now) : 0;
   const usedWk = useSnapWk ? (mwk.pct / 100) * C_wk + sumUsd(rows, snapAt, now) : sumUsd(rows, wk.start, now);
   const usedMo = mo === null ? null : useSnapMo ? (mmo.pct / 100) * C_mo + sumUsd(rows, snapAt, now) : sumUsd(rows, mo.start, now);
   const src = useSnapWk && useSnapMo ? "snap" : "ledger";
   const marginTotal = src === "snap" ? c.pace.margin : c.pace.margin + c.pace.external_margin_pct;
 
   const base = {
-    src: ledger === null && !fresh ? null : src,
+    src: !hasLedger && !fresh ? null : src,
     period_src: periodSrc,
     p_5h: round1(p5h(used5h)),
     p_wk: round1(pwk(usedWk)),
@@ -325,13 +351,13 @@ export function goPaceState({ cfg, ledger, snapshots = [], health = {}, now, pre
     used_5h: round1(used5h),
     used_wk: round1(usedWk),
     used_mo: usedMo === null ? null : round1(usedMo),
-    resets: { "5h": w5 ? new Date(w5.end).toISOString() : null, wk: new Date(wk.end).toISOString(), mo: mo ? new Date(mo.end).toISOString() : null },
+    resets: { "5h": useSnap5h ? isoOrNull(mroll.reset) : isoOrNull(w5 ? w5.end : NaN), wk: isoOrNull(wk.end), mo: mo ? isoOrNull(mo.end) : null },
     margin: round1(marginTotal),
   };
   const done = (state, reason, extra = {}) => ({ ...blank(state, reason), ...base, ...extra });
 
   // Rule 2: unknown.
-  if (ledger === null && !fresh) return done("unknown", "no ledger", { ...base, src: null });
+  if (!hasLedger && !fresh) return done("unknown", "no ledger", { ...base, src: null });
   if (mo === null) return done("unknown", "no period");
   if (fresh) {
     for (const [w, m, C, start] of [
@@ -339,7 +365,7 @@ export function goPaceState({ cfg, ledger, snapshots = [], health = {}, now, pre
       ["mo", mmo, C_mo, mo.start],
     ]) {
       const snapUsed = w === "wk" ? useSnapWk : useSnapMo;
-      if (snapUsed && m.pct > 0 && sumUsd(rows, start, snapAt) > 1.1 * (m.pct / 100) * C) {
+      if (snapUsed && m.pct > 0 && sumUsd(rows, start, snapAt) > 1.1 * ((m.pct + 1) / 100) * C) {
         return done("unknown", "allowance mismatch");
       }
     }
