@@ -78,8 +78,12 @@ def build_route_table(models_csv: str) -> dict[str, str]:
 
 
 def parse_routed_models(models_csv: object, default: str = DEFAULT_GO_MODELS) -> list[str]:
-    """Ordered routed model ids, falling back to the default when unusable."""
-    if not isinstance(models_csv, str) or not models_csv.strip():
+    """Ordered routed model ids.
+
+    An explicit empty string routes nothing (fail closed); only a non-str
+    value (e.g. a mocked settings object) falls back to the default list.
+    """
+    if not isinstance(models_csv, str):
         models_csv = default
     seen: list[str] = []
     for part in models_csv.split(","):
@@ -154,7 +158,9 @@ def check_gateway_auth(request: Request, token: object) -> JSONResponse | None:
     provided = bearer[7:].strip() if bearer.lower().startswith("bearer ") else ""
     if not provided:
         provided = request.headers.get("x-api-key", "")
-    if not provided or not hmac.compare_digest(provided, configured):
+    if not provided or not hmac.compare_digest(
+        provided.encode("utf-8", "surrogateescape"), configured.encode("utf-8")
+    ):
         return error_response(401, "authentication_error", "gateway: invalid gateway token")
     return None
 
@@ -236,18 +242,23 @@ def build_gateway_router(
     timeout_s: object = DEFAULT_TIMEOUT_S,
     version: str = GATEWAY_VERSION,
     db_path: str | Path | None = None,
-    test_client_host: str | None = "testclient",
+    test_client_host: str | None = None,
 ) -> APIRouter:
     """Build the /gw router. All config is passed explicitly (never read from
     a possibly-mocked settings object at request time); non-str values fail
     closed to safe defaults, never to a 500.
 
-    ``test_client_host`` names the synthetic TestClient host treated as
-    loopback; pass None to enforce strict loopback (used by the 403 test).
+    ``test_client_host`` names an extra host treated as loopback (the
+    synthetic Starlette TestClient host); it defaults to None so production
+    enforces strict loopback — tests pass it explicitly.
     """
 
     base_url = _as_str(go_base_url, DEFAULT_GO_BASE_URL).rstrip("/") or DEFAULT_GO_BASE_URL
-    routed_models = parse_routed_models(models if isinstance(models, str) else "")
+    routed_models = parse_routed_models(models)
+    if not routed_models:
+        logger.warning(
+            "gateway: no Go models routed (GATEWAY_GO_MODELS is empty); every model will 404"
+        )
     route_table = build_route_table(",".join(routed_models))
     try:
         read_timeout = float(timeout_s)  # type: ignore[arg-type]
@@ -319,6 +330,9 @@ def build_gateway_router(
         headers: dict[str, str] = {
             "content-type": "application/json",
             "accept": request.headers.get("accept", "application/json"),
+            # Identity only: the relay forwards aiter_raw() bytes verbatim and
+            # never forwards content-encoding, so the upstream must not compress.
+            "accept-encoding": "identity",
             "anthropic-version": request.headers.get(
                 "anthropic-version", _ANTHROPIC_VERSION_DEFAULT
             ),

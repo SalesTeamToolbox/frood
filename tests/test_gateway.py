@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 from core.config import Settings
 from dashboard import gateway as gw_module
-from dashboard.gateway import build_gateway_router
+from dashboard.gateway import DEFAULT_GO_MODELS, build_gateway_router, parse_routed_models
 from dashboard.server import create_app
 
 TOKEN = "test-gateway-token-abc123"
@@ -60,8 +60,15 @@ def _settings(**overrides) -> Settings:
     return Settings(**kw)
 
 
-def _client_for(monkeypatch, settings_obj, handler, go_key=GO_KEY, db_path=None):
-    """Build a real create_app TestClient whose upstream is a MockTransport."""
+def _client_for(
+    monkeypatch, settings_obj, handler, go_key=GO_KEY, db_path=None, test_client_host="testclient"
+):
+    """Build a real create_app TestClient whose upstream is a MockTransport.
+
+    The synthetic TestClient host is allow-listed explicitly (production
+    create_app enforces strict loopback); pass test_client_host=None to
+    exercise the strict default.
+    """
     monkeypatch.setattr("dashboard.server.settings", settings_obj)
     transport = httpx.MockTransport(handler)
 
@@ -70,6 +77,12 @@ def _client_for(monkeypatch, settings_obj, handler, go_key=GO_KEY, db_path=None)
         return _REAL_ASYNC_CLIENT(*args, **kwargs)
 
     monkeypatch.setattr("dashboard.gateway.httpx.AsyncClient", factory)
+    if test_client_host is not None:
+        original = gw_module.build_gateway_router
+        monkeypatch.setattr(
+            "dashboard.server.build_gateway_router",
+            lambda **kw: original(test_client_host=test_client_host, **kw),
+        )
     if go_key is None:
         monkeypatch.delenv("OPENCODE_GO_KEY", raising=False)
     else:
@@ -431,6 +444,66 @@ def test_upstream_timeout_504(monkeypatch):
 
 
 # -- bar 8: non-streaming passthrough ------------------------------------------
+
+
+def test_upstream_accept_encoding_identity(monkeypatch):
+    """GW-16: upstream sees accept-encoding: identity (aiter_raw stays raw)."""
+    seen: list = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, headers={"content-type": "application/json"}, json={})
+
+    client = _client_for(monkeypatch, _settings(), handler)
+    assert client.post("/gw/v1/messages", json=_msg_body(), headers=AUTH_BEARER).status_code == 200
+    assert seen[0].headers["accept-encoding"] == "identity"
+
+
+def test_non_ascii_credentials_401(monkeypatch):
+    """GW-17: non-ASCII credential bytes => 401, never a 500."""
+    seen: list = []
+    client = _client_for(monkeypatch, _settings(), _streaming_handler(seen))
+    for headers in (
+        {b"authorization": b"Bearer \xff\xfe"},
+        {b"x-api-key": b"\xff"},
+    ):
+        resp = client.post("/gw/v1/messages", json=_msg_body(), headers=headers)
+        assert resp.status_code == 401
+        assert resp.json()["error"]["type"] == "authentication_error"
+    assert seen == []
+
+
+def test_create_app_strict_loopback_by_default(monkeypatch):
+    """GW-18: create_app without the test override refuses TestClient host."""
+    seen: list = []
+    client = _client_for(monkeypatch, _settings(), _streaming_handler(seen), test_client_host=None)
+    resp = client.post("/gw/v1/messages", json=_msg_body(), headers=AUTH_BEARER)
+    assert resp.status_code == 403
+    assert seen == []
+
+
+def test_empty_models_routes_nothing(monkeypatch, caplog):
+    """GW-19: explicit empty GATEWAY_GO_MODELS => empty table + warning."""
+    seen: list = []
+    with caplog.at_level(logging.WARNING, logger="frood.gateway"):
+        client = _client_for(monkeypatch, _settings(gateway_go_models=""), _streaming_handler(seen))
+    assert any("no Go models routed" in r.getMessage() for r in caplog.records)
+    resp = client.post("/gw/v1/messages", json=_msg_body(), headers=AUTH_BEARER)
+    assert resp.status_code == 404
+    models = client.get("/gw/v1/models", headers=AUTH_BEARER).json()
+    assert models["data"] == []
+    assert models["first_id"] is None
+    assert models["last_id"] is None
+    assert seen == []
+
+
+def test_parse_routed_models_empty_vs_non_str():
+    """GW-20: empty string routes nothing; non-str falls back to defaults."""
+    assert parse_routed_models("") == []
+    assert parse_routed_models("  , ,") == []
+    assert parse_routed_models(" a ,,b,a ") == ["a", "b"]
+    assert parse_routed_models(None) == DEFAULT_GO_MODELS.split(",")
+    assert parse_routed_models(MagicMock()) == DEFAULT_GO_MODELS.split(",")
 
 
 def test_non_streaming_json_passthrough(monkeypatch):
