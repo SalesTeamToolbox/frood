@@ -297,6 +297,10 @@ skips it (loudly) for emergencies; `POLL`, `BEAT`, `STALE`, `WAITER_STALE` and `
 check`'s lint step is not locked, and its test step takes the lock once. `FROOD_SUITE_LOCK_HELD=1` stops a nested
 `make test` spawned under pytest from deadlocking. Frood had no suite lock before; `make check` never queued.
 
+If `SUITE_LOCK_ROOT` and `HOME` are both unset and no passwd home exists, or the lock root cannot be created,
+`suite_lock_acquire` fails fast: it prints an `==> suite lock: ERROR:` line to stderr and returns 2 instead of
+waiting forever, so `make test` exits at once (`suite_lock_acquire … || exit 1`).
+
 ### Recommended parallelism caps (documented, not enforced)
 
 None of Frood's runners are capped by this ticket; set these where you run them:
