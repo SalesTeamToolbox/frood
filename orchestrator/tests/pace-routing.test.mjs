@@ -32,6 +32,8 @@ const OVER_ROLES = "pace: OVER — critic and senior via oc-worker --role, not A
 function underBody(roles = ["worker", "worker-strong", "critic", "senior"]) {
   let b = FULL;
   for (const role of roles) b = b.replace(new RegExp(`^(${role} +use )`, "m"), `$1${PACE_POLICY[role]} (pace UNDER), fallback `);
+  // a guarded-path senior review stays the in-session Fable senior (A4 r2)
+  if (roles.includes("senior")) b = b.replace(/^(senior +use .*)$/m, "$1 (not for guarded paths)");
   return b;
 }
 const TODAY = ["worker-nvidia", "worker", "worker-free"];
@@ -131,7 +133,7 @@ for (const state of ["off", "unknown", "on", "over", "under"]) {
       assert.match(body, /^worker {9}use cc-worker \(pace UNDER\), fallback worker-nvidia 👁$/m);
       assert.match(body, /^worker-strong  use cc-worker-strong \(pace UNDER\), fallback worker-strong 👁$/m);
       assert.match(body, /^critic {9}use cc-critic \(pace UNDER\), fallback critic$/m);
-      assert.match(body, /^senior {9}use cc-senior \(pace UNDER\), fallback senior$/m);
+      assert.match(body, /^senior {9}use cc-senior \(pace UNDER\), fallback senior \(not for guarded paths\)$/m);
     }
     assert.equal(full.stdout, head + body);
     // under changes exactly the 4 policy lines; scout, orchestrator and every other line are as captured
@@ -555,7 +557,9 @@ test("A4 table: role × pace state × Fable × session gives exactly the policy 
           const tag = `${role} ${state} fable=${fable} session=${session}`;
           assert.deepEqual(r.chain, chain, tag);
           assert.equal(r.prepended, prepended, tag);
-          assert.deepEqual(paceChain(role, CH[role], pace), session === "none" ? chain : paceChain(role, CH[role], pace), tag);
+          // paceChain itself, whatever the session: the cc-first chain exactly when the policy prepends, else the baseline
+          const paced = state === "under" && CC[role] && !(role === "senior" && fable === "over") ? [CC[role], ...CH[role]] : CH[role];
+          assert.deepEqual(paceChain(role, CH[role], pace), paced, tag);
           if (session !== "none") assert.equal(r.reads, 0, `${tag}: a --session never reads the pace in the role expansion`);
           cases++;
         }
@@ -568,6 +572,8 @@ test("A4 table: role × pace state × Fable × session gives exactly the policy 
 test("A4: --role critic --session <Claude id> resumes on cc-critic (fake claude gets --resume <id>); receipt cc_pace.role critic", () => {
   for (const state of ["over", "unknown"]) {
     const h = paceHome(state);
+    fs.mkdirSync(path.join(h, ".claude", "agents"), { recursive: true });
+    fs.writeFileSync(path.join(h, ".claude", "agents", "critic.md"), "---\nname: critic\n---\nCritic contract.\n"); // A4 r2: a cc reader needs its contract
     const ccArgs = path.join(h, "cc-args.json");
     const r = ocw(h, ["--role", "critic", "--session", CLAUDE_SES], { FAKE_CC_ARGS_FILE: ccArgs });
     assert.equal(r.status, 0, r.stderr);

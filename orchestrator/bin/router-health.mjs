@@ -23,6 +23,7 @@
 //   not Agent(critic|senior) unless guarded`. UNDER (cc-pacing-v2 A4) changes only the worker, worker-strong, critic
 //   and senior lines to `use cc-<role> (pace UNDER), fallback <agent>` (PACE_POLICY in pace-read.mjs), except when
 //   that cc agent is down in pool-health (isDown) or, for senior, while Fable is over: then the line is today's.
+//   The paced senior line ends ` (not for guarded paths)`: a guarded-path senior review stays the in-session Fable senior.
 //   --json adds a top-level `pace` key; the stamp never holds it.
 // --free: prints a FREE INVENTORY section after the role lines (also included in default output)
 // --probe-free: probes every unused, allowed free model (max 12, serial), writes free-inventory.json, never marks down/up
@@ -528,7 +529,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const why = r.chain.filter((c) => c.state !== "healthy").map((c) => `${c.agent}: ${c.state}${c.detail ? ` (${c.detail})` : ""}`);
       const visionInfo = r.use ? (r.chain.find(c => c.agent === r.use)?.vision ? " 👁" : "") : "";
       const pacePrefix = pacePrefixFor(role, pace);
-      console.log(`${role.padEnd(14)} use ${pacePrefix}${r.use || "NONE — no healthy agent in chain"}${visionInfo}${why.length ? `   [skipped ${why.join("; ")}]` : ""}`);
+      const paceSuffix = pacePrefix && role === "senior" ? " (not for guarded paths)" : ""; // guarded senior stays in-session Fable
+      console.log(`${role.padEnd(14)} use ${pacePrefix}${r.use || "NONE — no healthy agent in chain"}${visionInfo}${paceSuffix}${why.length ? `   [skipped ${why.join("; ")}]` : ""}`);
     }
     for (const n of report.notes) console.log(`note: ${n}`);
     // Print free inventory summary ALWAYS (when live available), details only with --free/--probe-free

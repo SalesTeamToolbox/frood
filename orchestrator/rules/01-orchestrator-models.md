@@ -71,7 +71,8 @@ Orchestrator writes the ticket + Mandate → **worker** codes in the ticket work
   4. **Headless Claude Code agents are never a fallback; preferred first only when pace is UNDER.**
      The pace role table (`PACE_POLICY`, `bin/pace-read.mjs`): `worker` → `cc-worker`, `worker-strong` →
      `cc-worker-strong`, `critic` → `cc-critic`, `senior` → `cc-senior` (not while Fable is over).
-     `scout` and `orchestrator` are never paced. When the `pace:` line reads UNDER, `oc-worker --role <role>`
+     `scout` and `orchestrator` are never paced. A guarded-path senior review stays the in-session Fable
+     `senior`. `cc-senior` via `--role senior` is for non-guarded reviews only. When the `pace:` line reads UNDER, `oc-worker --role <role>`
      puts that cc agent first by itself. Any other pace state keeps today's chain.
      A `--session` never pace-prepends. `--role <role> --session <id>` with an id that does not start with
      `ses_` resumes on the role's cc agent, in any pace state. A `ses_` id keeps today's chain.

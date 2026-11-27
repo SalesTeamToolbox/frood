@@ -105,7 +105,11 @@
 //   Readers (cc-critic, cc-senior: a cc agent matching READONLY_AGENT_RE): `--tools Read,Grep,Glob,Bash
 //   --strict-mcp-config --allowedTools Bash --disallowedTools Edit,Write,NotebookEdit` in place of the writer tool
 //   flags, and no acceptEdits; they get the read-only guard (scratch footer, tamper and worktree check,
-//   readonly_violation) and the verdict gate like an OpenCode critic. Plus `--resume <id>` for --session and the
+//   readonly_violation) and the verdict gate like an OpenCode critic. A reader also gets its role contract:
+//   `--append-system-prompt-file <out>.contract.md` right after --settings, the body (frontmatter stripped) of
+//   <ORCH_HOME or home>/.claude/agents/<role>.md (cc-critic → critic.md, cc-senior → senior.md), and a read-only fence
+//   footer. A missing or empty contract file skips the hop (reason and receipt note `cc-no-contract: <file>`, no attempt
+//   used), so the chain falls back to the OpenCode reader; a reader never runs contract-less. Plus `--resume <id>` for --session and the
 //   automatic resume. Hook-free: the owner's
 //   Stop hooks (an asyncRewake peer-mail wake, the repo's learning hooks) would keep a finished run alive and dirty the
 //   worktree; the child env also gets PEER_WAKE_MAX_MIN=0 (overriding any inherited value) as a backstop. Never `--bare`
@@ -544,6 +548,28 @@ export function ccReaderWaitMin() {
 }
 // A cc reader gave up waiting for its `ccread` slot: runChain skips to the next agent (no attempt used).
 export class CcSlotTimeout extends Error {}
+// A cc reader whose role contract is missing: runChain skips to the next agent (no attempt used), never contract-less.
+export class CcNoContract extends Error {}
+
+// The role contract of a cc reader (cc-pacing-v2 A4 r2): the installed Claude Code agent file of its role,
+// <ORCH_HOME or home>/.claude/agents/<agent without "cc-">.md (cc-critic → critic.md, cc-senior → senior.md; same home
+// rule as install.mjs homeDir). `claude -p` gets only the short pointer prompt, so without this the run has no critic or
+// senior contract (VERDICT first line, findings, BLAST RADIUS) and the verdict gate reads it INVALID.
+export function ccContractFile(agent) {
+  return path.join(process.env.ORCH_HOME || os.homedir(), ".claude", "agents", `${String(agent).replace(/^cc-/, "")}.md`);
+}
+/** The contract body (frontmatter stripped), or null when the file is missing, unreadable or has an empty body. */
+export function ccContract(agent) {
+  let text;
+  try {
+    text = fs.readFileSync(ccContractFile(agent), "utf8");
+  } catch {
+    return null;
+  }
+  const m = text.match(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/);
+  const body = (m ? text.slice(m[0].length) : text).trim();
+  return body ? body + "\n" : null;
+}
 
 function alive(pid) {
   try {
@@ -1277,7 +1303,7 @@ async function runChain(a) {
   let attempts = 0;
   let visionFallbackWarning = false;
   let liveModels; // `opencode models`, read once and only if some hop has a model to check
-  const notes = []; // receipt `notes`: chain events that are not errors of the run that answered (cc-slot-timeout)
+  const notes = []; // receipt `notes`: chain events that are not errors of the run that answered (cc-slot-timeout, cc-no-contract)
   for (let i = 0; i < chain.length && attempts < 3; i++) {
     const agent = chain[i];
     // The first hop reuses `a` (its --session, --model) only when it is the agent `a` books: after the vision
@@ -1309,7 +1335,7 @@ async function runChain(a) {
     try {
       r = await runWorker(first ? a : { ...a, agent, session: undefined, model: undefined });
     } catch (e) {
-      if (!(e instanceof CcSlotTimeout)) throw e;
+      if (!(e instanceof CcSlotTimeout) && !(e instanceof CcNoContract)) throw e;
       attempts--; // nothing was spawned; r keeps the previous hop's result, if any
       hops.push({ agent, model, skipped: true, reason: e.message });
       notes.push(e.message);
@@ -1375,7 +1401,7 @@ function noPoolErrors(hops) {
     : absent.length === hops.length ? "absent from opencode models"
     : "absent from opencode models or known-down (pool-health)";
   const errors = [`every agent in the chain is ${why}`];
-  for (const h of hops) if (/^cc-slot-timeout/.test(h.reason || "")) errors.push(h.reason);
+  for (const h of hops) if (/^cc-(slot-timeout|no-contract)/.test(h.reason || "")) errors.push(h.reason);
   if (absent.length) errors.push(`absent from opencode models: ${absent.join(", ")}`);
   return errors;
 }
@@ -1406,6 +1432,10 @@ export async function runWorker(a) {
   const safe = (m) => (m.startsWith("-") ? "\n" + m : m);
 
   const promptText = fs.readFileSync(a.prompt, "utf8"); // before the slot: a bad --prompt must not leak a slot, registry entry or timer
+  // A cc reader runs with its role contract or not at all (before the slot: a skipped hop holds nothing).
+  const ccReader = isCc && isCcReader(a.agent);
+  const contract = ccReader ? ccContract(a.agent) : null;
+  if (ccReader && !contract) throw new CcNoContract(`cc-no-contract: ${ccContractFile(a.agent)}`);
   // Provider slot first: a run waiting for Nvidia holds no machine slot and has not started its clock.
   let providerSlot = null;
   let releaseMachine = null;
@@ -1547,14 +1577,23 @@ export async function runWorker(a) {
     fenceBefore = snap === null ? null : parseStatusZ(snap);
   }
   const fenceState = { paths: [], restored: [], left: [], suspected: [], notes: [], eventsByPath: new Map() };
-  const fenceFooter = footer(dir, out, fenceMain);
+  // A cc reader is told to read, not "create and edit files" (the OpenCode readers keep the shared footer).
+  const fenceFooter = ccReader ? `\nYour worktree is ${dir}. Read it; do not create or edit files in it.\n` : footer(dir, out, fenceMain);
+  // The cc reader's contract goes to `claude` as an appended system prompt file beside the run's out file.
+  let contractFile = null;
+  if (ccReader) {
+    contractFile = out + ".contract.md";
+    atomicWrite(contractFile, contract);
+  }
   const base = promptText + reportLine + FOOTER + readonlyFooter + visionFooter + fenceFooter;
   const cliFor = (session, message) => {
     if (isCc) {
       // The prompt comes right after -p: --tools and --allowedTools are variadic and would swallow a later positional.
       // --settings disableAllHooks: the owner's Stop hooks must not keep a finished run alive or dirty the worktree.
-      // Writers keep cc-worker's argv byte-for-byte; readers swap the tool/permission flags (ccToolArgs).
-      const cc = ["-p", safe(message), "--model", model, "--settings", CC_SETTINGS, ...ccToolArgs(a.agent), "--permission-prompts", "none", "--output-format", "stream-json", "--verbose"];
+      // Writers keep cc-worker's argv byte-for-byte; readers swap the tool/permission flags (ccToolArgs) and get their
+      // role contract with --append-system-prompt-file, placed before the variadic --tools so it cannot be swallowed.
+      const contractArgs = contractFile ? ["--append-system-prompt-file", contractFile] : [];
+      const cc = ["-p", safe(message), "--model", model, "--settings", CC_SETTINGS, ...contractArgs, ...ccToolArgs(a.agent), "--permission-prompts", "none", "--output-format", "stream-json", "--verbose"];
       if (session) cc.push("--resume", session);
       return cc;
     }

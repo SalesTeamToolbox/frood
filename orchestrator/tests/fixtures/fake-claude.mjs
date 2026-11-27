@@ -8,7 +8,7 @@
 //   usage-no-result   -> init, assistant events carrying message.usage (message id "msg-1" twice, as stream-json repeats a
 //                        message per content block, then "msg-2"), never a `result` event, then sleeps (token fallback)
 //   edit              -> writes fake-edit.txt in its cwd (a write a read-only role must not make), then as success
-// FAKE_CC_ARGV_OUT, when set, gets the argv as a JSON array at start.
+// FAKE_CC_ARGV_OUT, when set, gets the argv as a JSON array at start. FAKE_CC_TEXT, when set, is the success reply text.
 // Every invocation writes FAKE_CC_ARGS_FILE ({argv, cwd, pid, ppid, peerWakeMaxMin}) at start, so a test sees when the
 // run began, which pid to check afterwards, who its parent is and the PEER_WAKE_MAX_MIN it got. The session is the --resume value, else FAKE_CC_SESSION, else
 // "cc-ses-fake123".
@@ -49,7 +49,7 @@ if (mode === "usage-limit") {
 } else {
   if (mode === "edit") fs.writeFileSync("fake-edit.txt", "written by fake claude\n");
   if (mode === "slow") await new Promise((r) => setTimeout(r, Number(process.env.FAKE_CC_DELAY || 1500)));
-  const text = `RESULT: DONE\nfake claude worked in ${process.cwd()}\n`;
+  const text = process.env.FAKE_CC_TEXT || `RESULT: DONE\nfake claude worked in ${process.cwd()}\n`;
   ev({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text }] } });
   result({
     subtype: "success",
