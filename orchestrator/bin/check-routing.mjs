@@ -5,6 +5,8 @@
 //     model at all in `opencode models` is a warning: the provider was removed from the harness on purpose.
 //   - a model the rule lists under "Dropped" appears in a dispatch file (commands/, agents/, skills/, CLAUDE.md)
 //   - a Claude Code model value is not an alias (haiku|sonnet|opus|fable|inherit), e.g. Task({ model: "claude-sonnet-4-5" })
+//   - a Claude model through OpenCode Go (`opencode-go/claude*`, `opencode-go/*anthropic*`): the owner
+//     forbids spending the Go allowance on Claude (Claude Code covers it on its own subscription)
 //   - a rules/ file uses bare "CC" (ambiguous: Claude Code vs CommandCode)
 // `--agent cc-worker` (headless Claude Code) is a known agent, never flagged; it is not a CHAINS role.
 //
@@ -16,7 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { modelAllowed, lacksDecision } from "./pool-health.mjs";
+import { modelAllowed, lacksDecision, isClaudeViaGo } from "./pool-health.mjs";
 import { CHAINS } from "./chains.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -111,6 +113,8 @@ export function checkRouting({ root = REPO, extra = [], models = null } = {}) {
 
   for (const file of files) {
     const rel = path.relative(root, file).replace(/\\/g, "/");
+    // Fixture text (tests/fixtures/) is example input, never a dispatch: never scanned.
+    if (rel.includes("tests/fixtures/")) continue;
     const isRule = rel.startsWith("rules/");
     const isCcAgent = rel.startsWith("agents/");
     const lines = fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n").split("\n");
@@ -118,6 +122,9 @@ export function checkRouting({ root = REPO, extra = [], models = null } = {}) {
       const at = `${rel.startsWith("..") ? file : rel}:${i + 1}`;
       for (const m of line.matchAll(OC_ID)) {
         const id = m[0];
+        // Owner rule (2026-11-26): never spend the Go allowance on a Claude model — flag it
+        // whether or not the model is in `opencode models`.
+        if (isClaudeViaGo(id)) problems.push(`${at}  Claude model through OpenCode Go \`${id}\` (owner rule: Claude runs on the Claude Code subscription)`);
         if (/^\/?\*/.test(line.slice(m.index + id.length))) continue; // wildcard mention like commandcode/Qwen/*
         const prov = id.split("/")[0];
         if (models && !models.has(id) && !providerHasModels(prov)) absentProviders.set(prov, (absentProviders.get(prov) || 0) + 1);
@@ -161,6 +168,7 @@ export function checkRouting({ root = REPO, extra = [], models = null } = {}) {
     try { names = fs.readdirSync(d).filter((n) => n.endsWith(".md")); } catch {}
     for (const n of names) {
       const m = fs.readFileSync(path.join(d, n), "utf8").split(/\r?\n---/)[0].match(/^model:\s*(\S+)/m);
+      if (m && isClaudeViaGo(m[1])) problems.push(`${path.join(d, n)}  Claude model through OpenCode Go \`${m[1]}\` (owner rule: Claude runs on the Claude Code subscription)`);
       if (m && lacksDecision(m[1])) problems.push(`${path.join(d, n)}  provider ${m[1].split("/")[0]} has no owner decision (router-health --decide)`);
       if (m && !modelAllowed(m[1])) problems.push(`${path.join(d, n)}  agent pinned to \`${m[1]}\`, which provider policy does not allow (providers.json)`);
     }
