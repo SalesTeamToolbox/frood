@@ -37,6 +37,7 @@ Write `<repo>/.opencode/reports/<id>/mandate.md` — the same shape `/frood-orch
   Never `pkill`, `killall` or `kill $(pgrep -f …)`: a name pattern also matches oc-worker and the worker's own
   shell (2026-11-24: a worker's `pkill -f fake-opencode` killed its own run). Kill one pid read from `ps`, and only
   a process this run started.
+- **Installer rule** (copy into every Mandate verbatim) — Never run an installer (`orchestrator/bin/install.mjs`, `ops/install.mjs`, or any other install script) from a worktree unless `ORCH_HOME` points at a scratch directory: without it the installer writes to the real home. Installing is the orchestrator's job, from main, after ship.
 
 ## 3. Put it on the board
 

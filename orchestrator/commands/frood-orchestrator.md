@@ -276,6 +276,8 @@ Code, read it before dispatching). Spawn the named agent — never hand-type a m
    Never `pkill`, `killall` or `kill $(pgrep -f …)` — a name pattern also matches oc-worker and the worker's own
    shell (2026-11-24: a worker's `pkill -f fake-opencode` killed its own run; a test's endless `spawnSync` hung
    the suite for a whole round). Kill one pid read from `ps`, and only a process this run started.
+
+   **Installer rule (required, verbatim in every Mandate):** Never run an installer (`orchestrator/bin/install.mjs`, `ops/install.mjs`, or any other install script) from a worktree unless `ORCH_HOME` points at a scratch directory: without it the installer writes to the real home. Installing is the orchestrator's job, from main, after ship.
    **When the repo has `.opencode/board/adapter.json`, every ticket is created and moved through
    `node {{ORCH_REPO}}/bin/board.mjs`** — `create` → `egm approve|waive` →
    `claim` → `oc-worker --ticket <id> --owner <session>` (which calls `board attach` itself) →

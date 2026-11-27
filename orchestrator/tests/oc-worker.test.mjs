@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { summarize, acquireSlot, slotDir, prio, args } from "../bin/oc-worker.mjs";
+import { summarize, acquireSlot, slotDir, prio, args, FOOTER } from "../bin/oc-worker.mjs";
 import { workerOutcome } from "../bin/outcome.mjs";
 import { CHAINS } from "../bin/chains.mjs";
 import { installFixtureGuard, fixtureChildren, reapFixtureChildren } from "./fixtures/fixture-guard.mjs";
@@ -2380,4 +2380,33 @@ test("fence: ORCH_EDIT_FENCE=0 leaves OPENCODE_CONFIG_CONTENT untouched", () => 
   assert.equal(r.status, 0, r.stderr);
   const env = JSON.parse(fs.readFileSync(envFile, "utf8"));
   assert.equal(env.oc, existing, "config unchanged when ORCH_EDIT_FENCE=0");
+});
+
+// ---------------------------------------------------------------- (d)(f) installer + status-line sentences (ws-guard-followups)
+const INSTALLER_SENTENCE =
+  "Never run an installer (`orchestrator/bin/install.mjs`, `ops/install.mjs`, or any other install script) from a worktree unless `ORCH_HOME` points at a scratch directory: without it the installer writes to the real home. Installing is the orchestrator's job, from main, after ship.";
+const STATUS_SENTENCE =
+  "The first line of your final reply is exactly `RESULT: DONE` or `RESULT: BLOCKED: <reason>`: capitals, with no markdown, emoji, quote or prefix. The parser is case-sensitive, and anything else counts as an error.";
+
+test("FOOTER carries the exact worker status-line sentence", () => {
+  assert.match(FOOTER, /RESULT: DONE/);
+  assert.match(FOOTER, /RESULT: BLOCKED: <reason>/);
+  assert.match(FOOTER, /case-sensitive/);
+  assert.match(FOOTER, /- Workers: The first line of your final reply is exactly/);
+  assert.ok(FOOTER.includes(STATUS_SENTENCE), "FOOTER holds the sentence verbatim");
+});
+
+test("every worker variant carries the installer sentence and the status-line sentence verbatim", () => {
+  for (const f of ["worker.md", "worker-free.md", "worker-nvidia.md", "worker-strong.md"]) {
+    const text = fs.readFileSync(path.join(HERE, "..", "agents", f), "utf8");
+    assert.ok(text.includes(INSTALLER_SENTENCE), `${f} carries the installer sentence verbatim`);
+    assert.ok(text.includes(STATUS_SENTENCE), `${f} carries the status-line sentence verbatim`);
+  }
+});
+
+test("frood-ticket.md and frood-orchestrator.md carry the installer sentence", () => {
+  for (const f of ["commands/frood-ticket.md", "commands/frood-orchestrator.md"]) {
+    const text = fs.readFileSync(path.join(HERE, "..", f), "utf8");
+    assert.ok(text.includes(INSTALLER_SENTENCE), `${f} carries the installer sentence verbatim`);
+  }
 });

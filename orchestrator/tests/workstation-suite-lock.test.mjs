@@ -111,3 +111,129 @@ test("make -n test recipe sources, acquires and releases the box-wide lock", () 
   assert.ok(out.includes("suite_lock_acquire"), "SUITE_LOCK=0 make -n test prints the acquire line: " + out);
   assert.ok(out.includes("suite_lock_release"), "SUITE_LOCK=0 make -n test prints the release line: " + out);
 });
+
+// ----------------------------------------------------------- (a) Makefile test trap (ws-guard-followups)
+
+// Poll `fn` every 50 ms up to `capMs`; throw (failing the test) past the cap.
+async function pollFor(fn, capMs, what) {
+  const deadline = Date.now() + capMs;
+  for (;;) {
+    if (fn()) return;
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+function writeFake(dir, name, body) {
+  const p = path.join(dir, name);
+  fs.writeFileSync(p, body);
+  fs.chmodSync(p, 0o755);
+  return p;
+}
+
+test("make test: SIGTERM to the make pid kills the pytest child and releases the lock", { timeout: 30_000 }, async () => {
+  const root = tmp();
+  const bin = tmp();
+  const pidfile = path.join(bin, "pytest.pid");
+  const fake = writeFake(bin, "fake-pytest", '#!/bin/sh\necho $$ > "$FAKE_PYTEST_PIDFILE"\nexec sleep 60\n');
+  const child = spawn("make", ["-C", REPO_ROOT, "test", `PYTEST=${fake}`], {
+    env: { ...process.env, SUITE_LOCK_ROOT: root, SUITE_LOCK_POLL: "0.2", FAKE_PYTEST_PIDFILE: pidfile },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let fakePid = null;
+  try {
+    await pollFor(() => fs.existsSync(pidfile) && fs.existsSync(path.join(root, "held")), 10000, "fake pytest start and lock held");
+    fakePid = Number(fs.readFileSync(pidfile, "utf8").trim());
+    assert.ok(Number.isInteger(fakePid) && fakePid > 0, "the pidfile holds the fake pytest pid");
+    child.kill("SIGTERM"); // the make pid only, never the fake directly
+    await pollFor(() => {
+      let alive = true;
+      try {
+        process.kill(fakePid, 0);
+      } catch {
+        alive = false;
+      }
+      return !alive && !fs.existsSync(path.join(root, "held"));
+    }, 5000, "fake pytest gone and lock released within 5 s of SIGTERM");
+    await pollFor(() => child.exitCode !== null || child.signalCode !== null, 5000, "make exit");
+    assert.ok(child.exitCode !== null || child.signalCode !== null, "make is gone after SIGTERM");
+  } finally {
+    try {
+      if (child.exitCode === null && child.signalCode === null && child.pid) child.kill("SIGKILL");
+    } catch {}
+    if (fakePid) {
+      try {
+        process.kill(fakePid, "SIGKILL");
+      } catch {}
+    }
+  }
+});
+
+test("make test: a pytest that exits 0 leaves make at 0 with the lock released", { timeout: 30_000 }, () => {
+  const root = tmp();
+  const bin = tmp();
+  const fake = writeFake(bin, "ok-pytest", "#!/bin/sh\nexit 0\n");
+  const r = spawnSync("make", ["-C", REPO_ROOT, "test", `PYTEST=${fake}`], {
+    env: { ...process.env, SUITE_LOCK_ROOT: root, SUITE_LOCK_POLL: "0.2" },
+    encoding: "utf8",
+    timeout: 25000,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(fs.existsSync(path.join(root, "held")), false, "the normal path releases the lock");
+});
+
+test("make test trap with pytest not started (pid unset): SIGTERM still exits 143 and releases the lock", { timeout: 30_000 }, async () => {
+  // The race senior review caught: a signal between trap installation and
+  // `pid=$!` (pytest never started). The trap block is extracted from the
+  // Makefile test recipe itself (`$$` unescaped the way make unescapes it),
+  // so this runs the shipped code, not a copy: a recipe reshape breaks the
+  // extraction loudly instead of silently testing a stale copy.
+  const recipe = fs.readFileSync(MAKEFILE, "utf8").split("\n");
+  const start = recipe.findIndex((l) => /^\s*pid=;/.test(l));
+  const end = recipe.findIndex((l, i) => i > start && /trap cleanup_int INT/.test(l));
+  assert.ok(start >= 0 && end > start, "the Makefile test recipe initialises pid and installs TERM/INT traps");
+  const trapBlock = recipe
+    .slice(start, end + 1)
+    .map((l) => l.replace(/^\s+/, "").replace(/\s*\\$/, "").replace(/\$\$/g, "$"))
+    .join("\n");
+  assert.match(trapBlock, /if \[ -n "\$pid" \]/, "the trap guards the unset pid");
+
+  const root = tmp();
+  const bin = tmp();
+  const sleeperFile = path.join(bin, "sleeper.pid");
+  const harness = writeFake(bin, "trap-nopid.sh", [
+    "#!/bin/bash",
+    `source "${LOCK}"`,
+    `export SUITE_LOCK_ROOT="${root}"`,
+    "export SUITE_LOCK_POLL=0.2",
+    'suite_lock_acquire "trap-nopid test" || exit 1',
+    trapBlock,
+    `sleep 60 & echo $! > "${sleeperFile}" # heartbeat stand-in: never exits on its own`,
+    "wait # bare wait: hangs forever unless the trap skips the unset pid",
+    "",
+  ].join("\n"));
+  const child = spawn("bash", [harness], { env: { ...process.env }, stdio: ["ignore", "pipe", "pipe"] });
+  let sleeper = null;
+  try {
+    await pollFor(
+      () => fs.existsSync(path.join(root, "held")) && fs.existsSync(sleeperFile),
+      10000,
+      "lock held with pytest never started",
+    );
+    sleeper = Number(fs.readFileSync(sleeperFile, "utf8").trim());
+    assert.ok(Number.isInteger(sleeper) && sleeper > 0, "the sleeper pid was recorded");
+    child.kill("SIGTERM"); // the harness shell only
+    await pollFor(() => child.exitCode !== null || child.signalCode !== null, 5000, "trap exit within 5 s of SIGTERM");
+    assert.equal(child.exitCode, 143, "the TERM trap exits 143 with pid unset");
+    assert.equal(fs.existsSync(path.join(root, "held")), false, "the lock is released");
+  } finally {
+    try {
+      if (child.exitCode === null && child.signalCode === null && child.pid) child.kill("SIGKILL");
+    } catch {}
+    if (sleeper) {
+      try {
+        process.kill(sleeper, "SIGKILL");
+      } catch {}
+    }
+  }
+});

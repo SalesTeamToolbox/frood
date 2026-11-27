@@ -264,6 +264,14 @@ export function writePassLog(lowered, eperm, errors, roots) {
   }
 }
 
+// Module scope: the run loop's sleep timer and its resolver, so a signal can
+// interrupt the 15 s wait instead of stalling a `systemctl restart` behind it.
+// Pause-transition state: doPass prints `paused` once on entering pause and
+// `resumed` once on leaving it.
+let sleepTimer = null;
+let sleepResolve = null;
+let lastPaused = false;
+
 function doPass() {
   const result = runPass({
     procRoot: defaultProcRoot(),
@@ -274,9 +282,12 @@ function doPass() {
     },
   });
   if (result.paused) {
-    console.log("paused");
+    if (!lastPaused) console.log("paused");
+    lastPaused = true;
     return { paused: true, lowered: 0, eperm: 0, roots: 0 };
   }
+  if (lastPaused) console.log("resumed");
+  lastPaused = false;
   if (result.lowered > 0 || result.eperm > 0 || result.errors > 0) {
     writePassLog(result.lowered, result.eperm, result.errors, result.roots);
   }
@@ -284,13 +295,29 @@ function doPass() {
 }
 
 function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => {
+    sleepResolve = resolve;
+    sleepTimer = setTimeout(() => {
+      sleepTimer = null;
+      sleepResolve = null;
+      resolve();
+    }, ms);
+  });
 }
 
 async function runLoop() {
   let stopping = false;
   const onSignal = () => {
     stopping = true;
+    if (sleepTimer !== null) {
+      clearTimeout(sleepTimer);
+      sleepTimer = null;
+    }
+    if (sleepResolve) {
+      const wake = sleepResolve;
+      sleepResolve = null;
+      wake();
+    }
   };
   process.on("SIGTERM", onSignal);
   process.on("SIGINT", onSignal);

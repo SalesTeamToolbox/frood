@@ -12,6 +12,9 @@
 //   attach <id> --owner <s> --pid <n> --out <path>
 //   session <id> --session <sid>     (records the desktop session holding the ticket in assignment.session; queued or
 //                                     working; claim/reopen carry it over; `dispatch.mjs` and `desk.mjs status` read it)
+//   scope <id> --scope <a,b,...> --reason <text> --by <who> [--expect-epoch N]
+//                                     (amends a queued/working ticket's scope: create-time checks, senior-reason
+//                                      union, EGM-trigger rules; refused on any other stage)
 //   release <id> --owner <s>   |   release <id> --force --by human --note <text>
 //   fail <id> --note <text>     |   unblock <id> --by human --note <text>
 //   close <id> --by human --sha <sha> --note <text>   (human-only: queued|working|ready|blocked → closed,
@@ -105,6 +108,7 @@ const STAGE = {
   reopen: { from: ["ready"], to: "working", phase: 2 },
   attach: { from: ["working"], to: "working", phase: 3 },
   session: { from: ["queued", "working"], to: null, phase: 3 }, // stays where it is: a label, not a transition
+  scope: { from: ["queued", "working"], to: null, phase: 3 }, // stays where it is: an amend, not a transition
   watch: { from: ["working"], to: "blocked", phase: 3 },
 };
 
@@ -649,7 +653,12 @@ function topDirs(scope) {
   return [...dirs];
 }
 function seniorFor(scope, adapter) {
-  const reasons = scope.filter((s) => matchAny(s, adapter.guarded_paths)).map((s) => `guarded path: ${s}`);
+  // A directory entry keeps its guarded meaning: `orchestrator/ops` counts
+  // against `orchestrator/ops/**` through the trailing-slash probe, so a
+  // normalised directory scope keeps its senior reason.
+  const reasons = scope
+    .filter((s) => matchAny(s, adapter.guarded_paths) || matchAny(`${s}/`, adapter.guarded_paths))
+    .map((s) => `guarded path: ${s}`);
   return { required: reasons.length > 0, reasons };
 }
 // The Mandate's "## Scope" section (or a leading "**Scope:**" block), parsed back
@@ -728,13 +737,38 @@ function mandateScopeIsOpenEnded(mand, scope) {
   return null;
 }
 
+// Scope normalisation (used by `create` and `scope`): trim, turn `\` into
+// `/`, strip a leading `./`, collapse repeated `/`, strip a trailing `/`.
+// Blank entries (`a,,b`) are dropped, as before; duplicates collapse to
+// first-seen order. A non-empty entry that normalises to nothing (`/`, `./`,
+// `//`) is a Usage error naming the raw entry — there is no sanctioned
+// spelling of "everything", so it must be said with real paths.
+function normScope(list) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of list) {
+    const t = String(raw ?? "").trim();
+    if (!t) continue;
+    let s = t.replace(/\\/g, "/");
+    while (s.startsWith("./")) s = s.slice(2);
+    s = s.replace(/\/{2,}/g, "/");
+    if (s.endsWith("/")) s = s.slice(0, -1);
+    if (!s) throw new Usage(`--scope entry "${t}" is empty after normalisation`);
+    if (!seen.has(s)) {
+      seen.add(s);
+      out.push(s);
+    }
+  }
+  return out;
+}
+
 function cmdCreate(ctx) {
   const o = ctx.o;
   const id = o._[0];
   if (!id || !ID_RE.test(id)) throw new Usage(`bad id "${id ?? ""}" — must match ^[a-z0-9][a-z0-9-]{0,59}$`);
   const mandate = path.resolve(need(o, "mandate"));
   if (!isFile(mandate)) throw new Usage(`mandate not found: ${mandate}`);
-  const scope = need(o, "scope").split(",").map((s) => s.trim()).filter(Boolean);
+  const scope = normScope(need(o, "scope").split(","));
   if (!scope.length) throw new Usage("--scope needs at least one path");
   const mand = fs.readFileSync(mandate, "utf8");
   // A scope entry on the hard deny list is never a worker's to edit, even when
@@ -1418,6 +1452,53 @@ function cmdSession(ctx, id) {
   });
 }
 
+// `scope` amends a queued or working ticket's scope with the create-time
+// checks (normalisation, deny list, open-ended Mandate grant), a senior-reason
+// union and a history event. Senior reasons are never removed; EGM triggers
+// are never removed either — a new trigger on a queued ticket re-pends EGM,
+// while on a working ticket the amend is refused (release the ticket and amend
+// it while queued).
+function cmdScope(ctx, id) {
+  const o = ctx.o;
+  const rawScope = need(o, "scope");
+  const reason = String(need(o, "reason")).trim();
+  const by = String(need(o, "by")).trim();
+  if (!reason) throw new Usage("--reason needs a non-empty value");
+  if (!by) throw new Usage("--by needs a non-empty value");
+  const scope = normScope(String(rawScope).split(","));
+  if (!scope.length) throw new Usage("--scope needs at least one path");
+  return write(ctx, id, o, "scope", (t) => {
+    assertFrom("scope", t);
+    for (const s of scope) {
+      if (matchAny(s, DENY)) throw new Refuse(`--scope entry is on the deny list: ${s}`);
+    }
+    const mandPath = path.resolve(t.mandate_path);
+    if (!isFile(mandPath)) throw new Usage(`mandate not found: ${mandPath}`);
+    const open = mandateScopeIsOpenEnded(fs.readFileSync(mandPath, "utf8"), scope);
+    if (open) throw new Refuse(`mandate scope is open-ended: "${open}"`);
+    // The triggers `create` would compute on the new scope.
+    const fresh = [];
+    if (scope.some((s) => matchAny(s, ctx.adapter.egm_paths))) fresh.push("data-model");
+    if (topDirs(scope).length > 3) fresh.push("many-modules");
+    const added = fresh.filter((name) => !t.egm.triggers.includes(name));
+    if (added.length && t.stage === "working") {
+      throw new Refuse(`scope adds EGM trigger ${added[0]}; release the ticket and amend it while queued`);
+    }
+    const oldJoined = t.scope.join(",");
+    t.scope = scope;
+    for (const r of seniorFor(scope, ctx.adapter).reasons) {
+      if (!t.senior.reasons.includes(r)) t.senior.reasons.push(r);
+    }
+    t.senior.required = t.senior.required || t.senior.reasons.length > 0;
+    for (const name of added) t.egm.triggers.push(name);
+    if (added.length) {
+      t.egm.required = true;
+      t.egm.status = "pending";
+    }
+    o.note = [`${reason}; scope ${oldJoined} -> ${scope.join(",")}`];
+  });
+}
+
 // Liveness (B7): the recorded worker is live while its pid is alive AND still that same process (`started`); when
 // the start-time lookup fails, pid existence alone decides. A worker that cannot be seen that way still proves it
 // is working through its output, its event stream or the lock heartbeat inside stale_minutes.
@@ -1575,6 +1656,7 @@ const COMMANDS = {
   heartbeat: (ctx, id) => cmdHeartbeat(ctx, id),
   attach: (ctx, id) => cmdAttach(ctx, id),
   session: (ctx, id) => cmdSession(ctx, id),
+  scope: (ctx, id) => cmdScope(ctx, id),
   watch: (ctx) => cmdWatch(ctx),
   release: (ctx, id) => cmdRelease(ctx, id),
   fail: (ctx, id) => cmdFail(ctx, id),
