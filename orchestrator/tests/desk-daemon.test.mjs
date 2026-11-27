@@ -821,12 +821,38 @@ test("nested: an idle holder with no parent still orphan-pages; a live holder st
   }
 });
 
-test("nested: a parent idle past the threshold (live pid, old statusUpdatedAt) does not suppress the orphan page", () => {
+test("nested: a live-pid parent idle 3 h gets the parent mail and no orphan page", () => {
+  const h = home();
+  nestedHeld(h, "m6a", { parent: "local_awake3" });
+  const mailbox = path.join(h, ".local", "share", "opencode-peer-mail", "mailbox.db");
+  const dir = path.join(h, ".claude", "sessions");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${process.pid}.json`), JSON.stringify({ hostSessionId: "local_awake3", sessionId: "ses_awake3", status: "idle", statusUpdatedAt: Date.now() - 180 * 60_000 }));
+  const saved = { ...process.env };
+  Object.assign(process.env, { ORCH_NO_NOTIFY: "1" });
+  try {
+    openEsc(h, "m6a");
+    assert.deepEqual(inHome(h, () => sweepOrphans()), ["m6a"]);
+    const state = daemonState(h);
+    assert.ok(state.orphaned.some((id) => id.startsWith("parent:m6a:")), "the parent is woken");
+    assert.ok(!state.orphaned.some((id) => id.startsWith("orphan:")), "no owner page");
+    const parent = mailTo(mailbox, "ses_awake3");
+    assert.equal(parent.length, 1, "the live parent is mailed");
+    assert.match(parent[0].subject, /\[nested m6a\]/);
+  } finally {
+    for (const k of ["ORCH_NO_NOTIFY"]) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+});
+
+test("nested: a parent idle 25 h (past the wake window) does not suppress the orphan page", () => {
   const h = home();
   const mailbox = path.join(h, ".local", "share", "opencode-peer-mail", "mailbox.db");
   const dir = path.join(h, ".claude", "sessions");
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, `${process.pid}.json`), JSON.stringify({ hostSessionId: "local_sleepy", sessionId: "ses_sleepy", status: "idle", statusUpdatedAt: Date.now() - 120 * 60_000 }));
+  fs.writeFileSync(path.join(dir, `${process.pid}.json`), JSON.stringify({ hostSessionId: "local_sleepy", sessionId: "ses_sleepy", status: "idle", statusUpdatedAt: Date.now() - 25 * 60 * 60_000 }));
   nestedHeld(h, "m6a", { parent: "local_sleepy", parentAgo: 2 });
   // no peer row for ses_sleepy: its only sign of life is the old session file
   const saved = { ...process.env };

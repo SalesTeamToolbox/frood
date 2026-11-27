@@ -595,19 +595,53 @@ test("parentSession: null with no held_parent; live via recent peer presence; no
   });
 });
 
-test("parentSession: a live pid with an old statusUpdatedAt is not live", async () => {
+test("parentSession: a live pid is live inside the wake window (3 h), not past it (25 h)", async () => {
   const { parentSession } = await import("../bin/orphan.mjs");
   const h = mkdtemp();
   const dir = path.join(h, ".claude", "sessions");
   fs.mkdirSync(dir, { recursive: true });
-  // a live pid (this process) whose host id maps to a peer id, but idle for 2 h
-  fs.writeFileSync(path.join(dir, `${process.pid}.json`), JSON.stringify({ hostSessionId: "local_sleepy", sessionId: "parent-sleepy", status: "idle", statusUpdatedAt: Date.now() - 120 * MIN }));
-  mkStream(h, "sl", { ageMin: 200, held_by: "cc", held_session: "child1", held_at: iso(200), held_parent: "local_sleepy" });
+  // a live pid (this process): idle 3 h first, then idle 25 h
+  fs.writeFileSync(path.join(dir, `${process.pid}.json`), JSON.stringify({ hostSessionId: "local_awake", sessionId: "parent-awake", status: "idle", statusUpdatedAt: Date.now() - 180 * MIN }));
+  mkStream(h, "w3", { ageMin: 300, held_by: "cc", held_session: "child1", held_at: iso(300), held_parent: "local_awake" });
   withHome(h, {}, () => {
-    escalate("sl");
-    const p = parentSession("sl");
-    assert.equal(p.id, "parent-sleepy");
-    assert.equal(p.live, false, "live pid alone never suppresses the owner page");
-    assert.ok(p.idleMs > orphanThresholdMs());
+    escalate("w3");
+    const p = parentSession("w3");
+    assert.equal(p.id, "parent-awake");
+    assert.equal(p.live, true, "a live-pid parent idle 3 h is inside the 24 h wake window");
+    assert.ok(p.idleMs > 170 * MIN && p.idleMs < 190 * MIN);
+  });
+  fs.writeFileSync(path.join(dir, `${process.pid}.json`), JSON.stringify({ hostSessionId: "local_awake", sessionId: "parent-awake", status: "idle", statusUpdatedAt: Date.now() - 25 * 60 * MIN }));
+  withHome(h, {}, () => {
+    const p = parentSession("w3");
+    assert.equal(p.id, "parent-awake");
+    assert.equal(p.live, false, "a live-pid parent idle 25 h is past the wake window");
+  });
+});
+
+test("parentSession: a dead-pid or transcript-only parent idle 3 h keeps the orphan bound (not live)", async () => {
+  const { parentSession } = await import("../bin/orphan.mjs");
+  const h = mkdtemp();
+  const dir = path.join(h, ".claude", "sessions");
+  fs.mkdirSync(dir, { recursive: true });
+  // dead pid holding the host id, updated 3 h ago; peer presence equally old so idleness is known
+  const dead = 2147483647;
+  fs.writeFileSync(path.join(dir, `${dead}.json`), JSON.stringify({ hostSessionId: "local_gone", sessionId: "parent-gone", status: "idle", statusUpdatedAt: Date.now() - 180 * MIN }));
+  mkStream(h, "d3", { ageMin: 300, held_by: "cc", held_session: "child1", held_at: iso(300), held_parent: "local_gone" });
+  mkPeers(h, { "parent-gone": 180 });
+  // transcript-only parent: no session file at all, transcript mtime 3 h ago
+  const repo = path.join(h, "wt");
+  fs.mkdirSync(repo, { recursive: true });
+  const tdir = path.join(h, ".claude", "projects", "wt");
+  fs.mkdirSync(tdir, { recursive: true });
+  const tfile = path.join(tdir, "parent-tx.jsonl");
+  fs.writeFileSync(tfile, '{"sessionId":"parent-tx"}\n');
+  const threeH = Date.now() - 180 * MIN;
+  fs.utimesSync(tfile, new Date(threeH), new Date(threeH));
+  mkStream(h, "t3", { ageMin: 300, repo, held_by: "cc", held_session: "child1", held_at: iso(300), held_parent: "parent-tx" });
+  withHome(h, {}, () => {
+    escalate("d3");
+    escalate("t3");
+    assert.equal(parentSession("d3").live, false, "dead-pid parent idle 3 h exceeds the 60 min orphan bound");
+    assert.equal(parentSession("t3").live, false, "transcript-only parent idle 3 h exceeds the 60 min orphan bound");
   });
 });

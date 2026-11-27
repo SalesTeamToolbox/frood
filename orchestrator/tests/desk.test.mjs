@@ -2767,3 +2767,37 @@ test("step: a decided ESCALATE on a shipped board ticket prints DONE; an open ti
   assert.deepEqual(r2.stdout.split("\n").filter(Boolean), [`ESCALATE senior ${fwd(path.join(o.runDir, "findings-r1.md"))}`]);
   assert.deepEqual(acksOf(o.h, o.name).filter((l) => l.resolved), [], "replay writes nothing");
 });
+
+test("resolve: --note is refused by commands other than resolve (exit 2)", () => {
+  const { h, name, runDir } = t8Stream("rs4");
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r1", runDir));
+    appendEvent(name, evDone("worker-r1", runDir));
+  });
+  for (const args of [
+    ["step", name, "run:worker-r1:done", "--note", "x"],
+    ["verdict", name, "worker-r1", "--findings", path.join(runDir, "findings-r1.md"), "--note", "x"],
+    ["merge-check", name, "worker-r1", "--note", "x"],
+  ]) {
+    const r = cli(h, args);
+    assert.equal(r.status, 2, args.join(" "));
+    assert.match(r.stderr, /unknown flag --note/, args.join(" "));
+  }
+  // resolve itself still accepts --note (covered above); step without it is unaffected
+  assert.match(cli(h, ["step", name, "run:worker-r1:done"]).stdout, /^ACTION critic /m);
+});
+
+test("resolve: a legacy child: escalations.jsonl row is not an escalation (exit 2, writes nothing)", () => {
+  const { h, name, runDir } = t8Stream("rs5");
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r1", runDir));
+    appendEvent(name, evDone("worker-r1", runDir));
+  });
+  escalationsRow(h, name, `child:${name}:ses_gone`, "child record");
+  const before = fs.existsSync(path.join(sdir(h), `${name}.acks.jsonl`)) ? fs.readFileSync(path.join(sdir(h), `${name}.acks.jsonl`), "utf8") : null;
+  const r = cli(h, ["resolve", name, `child:${name}:ses_gone`, "--note", "x"]);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /no escalation/);
+  const after = fs.existsSync(path.join(sdir(h), `${name}.acks.jsonl`)) ? fs.readFileSync(path.join(sdir(h), `${name}.acks.jsonl`), "utf8") : null;
+  assert.equal(after, before, "refusal writes nothing");
+});

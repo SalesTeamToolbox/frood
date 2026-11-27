@@ -1529,7 +1529,9 @@ function cmdResolve(opts) {
       } catch {
         continue;
       }
-      if (e && e.stream === stream && e.key === key) {
+      // A `child:` key is a child-session record, never an escalation (openEscalations drops them);
+      // resolving one would ack something the desk never counted.
+      if (e && e.stream === stream && e.key === key && !String(e.key).startsWith("child:")) {
         hasRow = true;
         break;
       }
@@ -2398,7 +2400,7 @@ function cmdModels() {
 
 // ---------------------------------------------------------------- main
 
-function parse(argv, { allowArgs = false } = {}) {
+function parse(argv, { allowArgs = false, cmd = null } = {}) {
   const opts = {};
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
@@ -2410,7 +2412,7 @@ function parse(argv, { allowArgs = false } = {}) {
     else if (k === "--by") opts.by = argv[++i];
     else if (k === "--until-event") opts.untilEvent = Number(argv[++i]);
     else if (allowArgs && k === "--findings") opts.findings = argv[++i];
-    else if (allowArgs && k === "--note") opts.note = argv[++i];
+    else if (allowArgs && cmd === "resolve" && k === "--note") opts.note = argv[++i];
     else if (allowArgs && !k.startsWith("--")) (opts.args ??= []).push(k);
     else throw new Error(`unknown flag ${k}`);
   }
@@ -2431,7 +2433,7 @@ export async function main(argv) {
   const allowArgs = cmd === "step" || cmd === "resolve" || cmd === "verdict" || cmd === "merge-check" || cmd === "daemon";
   let opts;
   try {
-    opts = parse(rest, { allowArgs });
+    opts = parse(rest, { allowArgs, cmd });
   } catch (e) {
     console.error(`desk: ${e.message}`);
     return 2;

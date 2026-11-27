@@ -107,8 +107,8 @@ idle child still has a live parent never pages the owner: the daemon peer-mails 
 `desk.mjs resolve` command), once per stream per claim under ledger key `parent:<stream>:<held_at>`
 (written only after the send succeeds; a failed send falls through to the owner page). The parent id
 is resolved at use time by `orphan.mjs resolvePeerSession` (`local_<uuid>` host ids map through
-`~/.claude/sessions/<pid>.json`) and its liveness by `orphan.mjs parentSession` (live only while its
-idleness is within `ORCH_ORPHAN_MIN` — a live pid alone never suppresses the owner page forever). The
+`~/.claude/sessions/<pid>.json`) and its liveness by `orphan.mjs parentSession` (live while a live pid
+  sits inside the peer-mail wake window `PEER_WAKE_MAX_MIN`, otherwise only while its idleness is within `ORCH_ORPHAN_MIN` — a live pid alone never suppresses the owner page forever). The
 fork is `desk.mjs pageOrphanOrParent`, called from `dpage`'s orphan branch and from `sweepOrphans`;
 the `held_parent` id is mailed alongside the holder on every desk mail too (`notifyHeldSession`, subject
 `desk: [nested <stream>]`), because the child that was paged may already be gone.

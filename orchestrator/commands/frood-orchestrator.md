@@ -311,7 +311,7 @@ Code, read it before dispatching). Spawn the named agent — never hand-type a m
    them to watch: the daemon peer-mails this session on a merge, senior review or sign-off, and this session
    reports it. After handling such a mail, close the escalation with
    `node {{ORCH_REPO}}/bin/desk.mjs resolve <stream> <key> --note "<what you did>"` (`peer_ack` alone does
-   not close it); a nested child's escalations reach its parent too, via the parent's own desk mail. An
+   not close it); a nested child's escalations reach its parent too, via the parent's own desk mail. A `desk: [nested <stream>] …` mail is for the parent, not a second copy to act on in parallel: while the child session is still working, leave the escalation to the child and only relay what is owner-facing from the child's report; when the mail says the child is idle or gone, message the child first, or handle the escalation yourself — then run `desk.mjs resolve <stream> <key> --note "<what you did>"`. An
    interactive `/frood-desk` is the fallback *you* open when the daemon cannot run — never an owner
    action item. Run the critic loop yourself only for a Claude Code `worker` agent (no stream events) or when
    the owner tells you to.
@@ -377,6 +377,7 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
   stops; the parent starts the next one. If the owner talks to this session directly and tells it to go on, it
   continues in place. `auto_next_module` applies only to a session without `parentSessionId`; a nested session
   still writes its handoff, reports, and stops.
+- **A `[nested <stream>]` desk mail is for the parent** (desktop app). A `desk: [nested <stream>] …` mail is for the parent, not a second copy to act on in parallel: while the child session is still working, leave the escalation to the child and only relay what is owner-facing from the child's report; when the mail says the child is idle or gone, message the child first, or handle the escalation yourself — then run `desk.mjs resolve <stream> <key> --note "<what you did>"`.
 - **Nested sessions report to the parent; only the parent talks to the owner** (desktop app). A nested session's
   reports and handoff cards are addressed to its parent: its `You:` line becomes `Parent:`, and anything that needs the
   owner is written `NEEDS OWNER: <one line>` and the session stops on it. It never asks the owner directly
@@ -470,7 +471,7 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
   this session when a ticket is ready to merge, needs a senior review, or needs an owner
   sign-off, and this session brings it to the owner. After handling that mail, run
   `node {{ORCH_REPO}}/bin/desk.mjs resolve <stream> <key> --note "<what you did>"` — and know a nested
-  child's escalations also reach its parent. So, for every streamed ticket:
+  child's escalations also reach its parent. A `desk: [nested <stream>] …` mail is for the parent, not a second copy to act on in parallel: while the child session is still working, leave the escalation to the child and only relay what is owner-facing from the child's report; when the mail says the child is idle or gone, message the child first, or handle the escalation yourself — then run `desk.mjs resolve <stream> <key> --note "<what you did>"`. So, for every streamed ticket:
 
   ```
   launch → same call sets <ticket> worker-rN in_progress (run id + pid in the content;

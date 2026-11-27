@@ -115,7 +115,10 @@ had already handled: the escalation stayed open because nothing resolved the des
 - **`orphan.mjs parentSession(stream)`** returns `{ id, idleMs, live }` for the resolved parent, or null
   with no `held_parent` or no resolution. `idleMs` follows the `holderSession` cc rules (session-file
   `status: idle` + `statusUpdatedAt`, else transcript mtime, plus peer-mail `peers.last_seen`, newest wins);
-  `live` needs `idleMs <= orphanThresholdMs()` — a live pid alone never suppresses the owner page.
+  `live` needs the parent found AND inside its window: a live pid in `~/.claude/sessions/` stays live while
+  `idleMs <= wakeWindowMs()` (`PEER_WAKE_MAX_MIN`, default 1440, same var and default as the peer-mail wake hook),
+  a parent with no live pid keeps the `orphanThresholdMs()` bound — a live pid alone still never suppresses the
+  owner page forever.
 - **`desk.mjs sendDeskMail(toSession, subject, body)`** (split out of `notifyHeldSession`) writes one
   peer-mail row, true only when written. `notifyHeldSession` mails the holder as today and, when
   `held_parent` resolves to a different id, the parent too (`desk: [nested <stream>]` subject, same body).
