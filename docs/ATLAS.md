@@ -437,7 +437,7 @@ topic: docs/atlas/desk.md
 
 ### scope fence (a worker's diff vs its ticket scope)
 handler: orchestrator/bin/scope-check.mjs checkScope() (git diff --name-only <base>..<sha> against the ticket's --scope, plus the hard deny list .claude/plans/** and .opencode/**; matchAny() lives here and board.mjs imports it back); callers orchestrator/bin/board.mjs cmdCreate()/cmdScope()/cmdRound()/cmdReady() and orchestrator/bin/desk.mjs doCritic()
-decides: whether a worker's committed diff may land — a path outside --scope or on the deny list records the round as CHANGES_REQUESTED even when the critic approved, refuses ready at the signed-off sha, is refused at create, and is sent back to the worker by the desk without spawning a paid critic; board.mjs scope amends a queued/working ticket's scope with the create-time checks, a senior-reason union and EGM-trigger rules
+decides: whether a worker's committed diff may land — a path outside --scope or on the deny list records the round as CHANGES_REQUESTED even when the critic approved, refuses ready at the signed-off sha, is refused at create, and is sent back to the worker by the desk without spawning a paid critic; board.mjs scope amends a queued/working ticket's scope with the create-time checks, a senior-reason union and EGM-trigger rules. A done round whose findings file gates INVALID (no VERDICT line, or no BLAST RADIUS entries) is refused before that fence and before the round cap — exit 1, nothing written, the round is neither counted nor blocked — and round is re-run once the critic's reply is saved verbatim.
 topic: docs/atlas/desk.md
 
 ### oc-worker load-based slots

@@ -1198,6 +1198,22 @@ test("round: INVALID findings after three counted rounds are refused, not rounds
   assert.ok(Buffer.compare(before, bytes(ticketFile(c, "p2-invalid-after-cap"))) === 0, "nothing written");
 });
 
+test("round: INVALID findings win over the scope fence when the diff leaves --scope", () => {
+  const c = mk();
+  workingTicket(c, "p2-invalid-fence", "--scope", "bin/demo.mjs");
+  const sha = commitFile(c, "README.md", "out of scope\n", "touch readme");
+  const invalid = fixtureText(c, "findings-invalid.md", "VERDICT: APPROVED\nTESTS: not run\n");
+  const before = bytes(ticketFile(c, "p2-invalid-fence"));
+  const r = round(c, "p2-invalid-fence", { findings: invalid, reviewed: sha });
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /findings gate INVALID/, "INVALID refusal must win over the scope fence");
+  assert.ok(!/out of scope:/.test(r.stderr), "the fence's out-of-scope reasons must not be produced for INVALID paperwork");
+  const after = JSON.parse(bytes(ticketFile(c, "p2-invalid-fence")));
+  assert.equal(after.stage, "working");
+  assert.equal(after.rounds.length, 0, "no round recorded");
+  assert.ok(Buffer.compare(before, bytes(ticketFile(c, "p2-invalid-fence"))) === 0, "nothing written");
+});
+
 test("phase 2 case 12: a worker question blocks the ticket without recording a round", () => {
   const c = mk();
   workingTicket(c, "p2-question");
