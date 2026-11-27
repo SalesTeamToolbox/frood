@@ -181,3 +181,59 @@ test("make test: a pytest that exits 0 leaves make at 0 with the lock released",
   assert.equal(r.status, 0, r.stderr);
   assert.equal(fs.existsSync(path.join(root, "held")), false, "the normal path releases the lock");
 });
+
+test("make test trap with pytest not started (pid unset): SIGTERM still exits 143 and releases the lock", { timeout: 30_000 }, async () => {
+  // The race senior review caught: a signal between trap installation and
+  // `pid=$!` (pytest never started). The trap block is extracted from the
+  // Makefile test recipe itself (`$$` unescaped the way make unescapes it),
+  // so this runs the shipped code, not a copy: a recipe reshape breaks the
+  // extraction loudly instead of silently testing a stale copy.
+  const recipe = fs.readFileSync(MAKEFILE, "utf8").split("\n");
+  const start = recipe.findIndex((l) => /^\s*pid=;/.test(l));
+  const end = recipe.findIndex((l, i) => i > start && /trap cleanup_int INT/.test(l));
+  assert.ok(start >= 0 && end > start, "the Makefile test recipe initialises pid and installs TERM/INT traps");
+  const trapBlock = recipe
+    .slice(start, end + 1)
+    .map((l) => l.replace(/^\s+/, "").replace(/\s*\\$/, "").replace(/\$\$/g, "$"))
+    .join("\n");
+  assert.match(trapBlock, /if \[ -n "\$pid" \]/, "the trap guards the unset pid");
+
+  const root = tmp();
+  const bin = tmp();
+  const sleeperFile = path.join(bin, "sleeper.pid");
+  const harness = writeFake(bin, "trap-nopid.sh", [
+    "#!/bin/bash",
+    `source "${LOCK}"`,
+    `export SUITE_LOCK_ROOT="${root}"`,
+    "export SUITE_LOCK_POLL=0.2",
+    'suite_lock_acquire "trap-nopid test" || exit 1',
+    trapBlock,
+    `sleep 60 & echo $! > "${sleeperFile}" # heartbeat stand-in: never exits on its own`,
+    "wait # bare wait: hangs forever unless the trap skips the unset pid",
+    "",
+  ].join("\n"));
+  const child = spawn("bash", [harness], { env: { ...process.env }, stdio: ["ignore", "pipe", "pipe"] });
+  let sleeper = null;
+  try {
+    await pollFor(
+      () => fs.existsSync(path.join(root, "held")) && fs.existsSync(sleeperFile),
+      10000,
+      "lock held with pytest never started",
+    );
+    sleeper = Number(fs.readFileSync(sleeperFile, "utf8").trim());
+    assert.ok(Number.isInteger(sleeper) && sleeper > 0, "the sleeper pid was recorded");
+    child.kill("SIGTERM"); // the harness shell only
+    await pollFor(() => child.exitCode !== null || child.signalCode !== null, 5000, "trap exit within 5 s of SIGTERM");
+    assert.equal(child.exitCode, 143, "the TERM trap exits 143 with pid unset");
+    assert.equal(fs.existsSync(path.join(root, "held")), false, "the lock is released");
+  } finally {
+    try {
+      if (child.exitCode === null && child.signalCode === null && child.pid) child.kill("SIGKILL");
+    } catch {}
+    if (sleeper) {
+      try {
+        process.kill(sleeper, "SIGKILL");
+      } catch {}
+    }
+  }
+});

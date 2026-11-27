@@ -1967,7 +1967,7 @@ test("scope ready: refuses a ticket whose signed-off sha leaves the scope", () =
 });
 
 // ---------------------------------------------------------------- scope normalisation + `scope` amend (ws-guard-followups)
-test("create normalises --scope: trims, strips ./, collapses //, drops dups; empty-after-normalise is exit 2", () => {
+test("create normalises --scope: trims, strips ./, collapses //, drops dups; empty-after-normalise is exit 2", { timeout: 30_000 }, () => {
   const c = mk();
   const r = board(c, "create", "norm-one", "--mandate", c.mandate, "--scope", "a/,./b//c/,a");
   assert.equal(r.status, 0, r.stderr);
@@ -1978,7 +1978,7 @@ test("create normalises --scope: trims, strips ./, collapses //, drops dups; emp
   assert.equal(fs.existsSync(ticketFile(c, "norm-bad")), false, "a refused create writes nothing");
 });
 
-test("a normalised directory scope keeps its senior reason against a guarded glob", () => {
+test("a normalised directory scope keeps its senior reason against a guarded glob", { timeout: 30_000 }, () => {
   const c = mk();
   const p = path.join(c.repo, ".opencode", "board", "adapter.json");
   const a = JSON.parse(fs.readFileSync(p, "utf8"));
@@ -1991,7 +1991,7 @@ test("a normalised directory scope keeps its senior reason against a guarded glo
   assert.deepEqual(r.ticket.senior.reasons, ["guarded path: orchestrator/ops"]);
 });
 
-test("checkScope admits a path under a stored directory scope (no fence override on round)", () => {
+test("checkScope admits a path under a stored directory scope (no fence override on round)", { timeout: 30_000 }, () => {
   const c = mk();
   const cr = board(c, "create", "dir-ok", "--mandate", c.mandate, "--scope", "orchestrator/ops");
   assert.equal(cr.status, 0, cr.stderr);
@@ -2004,7 +2004,7 @@ test("checkScope admits a path under a stored directory scope (no fence override
   assert.equal(r.ticket.rounds[0].critic.effective, "APPROVED", "the fence left the critic's verdict alone");
 });
 
-test("scope amends a queued ticket: new scope, senior union, history event", () => {
+test("scope amends a queued ticket: new scope, senior union, history event", { timeout: 30_000 }, () => {
   const c = mk();
   const cr = board(c, "create", "amend-q", "--mandate", c.mandate, "--scope", "bin/a.mjs");
   assert.equal(cr.status, 0, cr.stderr);
@@ -2020,7 +2020,7 @@ test("scope amends a queued ticket: new scope, senior union, history event", () 
   assert.equal(h.note, "widen a little; scope bin/a.mjs -> bin/b.mjs,docs/c.md");
 });
 
-test("scope keeps earlier senior reasons and unions new ones", () => {
+test("scope keeps earlier senior reasons and unions new ones", { timeout: 30_000 }, () => {
   const c = mk();
   const cr = board(c, "create", "amend-senior", "--mandate", c.mandate, "--scope", "ops/train.sh");
   assert.equal(cr.status, 0, cr.stderr);
@@ -2036,14 +2036,14 @@ test("scope keeps earlier senior reasons and unions new ones", () => {
   assert.equal(r2.ticket.senior.required, true);
 });
 
-test("scope amends a working ticket and is refused on ready/blocked/failed/closed", () => {
+test("scope amends a working ticket and is refused on ready/blocked/failed/closed", { timeout: 30_000 }, () => {
   const c = mk();
   workingTicket(c, "amend-w");
   const r = board(c, "scope", "amend-w", "--scope", "bin/c.mjs", "--reason", "narrow it", "--by", "s1");
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.ticket.stage, "working");
   assert.deepEqual(r.ticket.scope, ["bin/c.mjs"]);
-  for (const stage of ["ready", "blocked", "failed", "closed"]) {
+  for (const stage of ["ready", "blocked", "failed", "closed", "shipped"]) {
     editTicket(c, "amend-w", (t) => { t.stage = stage; });
     const before = bytes(ticketFile(c, "amend-w"));
     const bad = board(c, "scope", "amend-w", "--scope", "bin/d.mjs", "--reason", "too late", "--by", "s1");
@@ -2053,7 +2053,7 @@ test("scope amends a working ticket and is refused on ready/blocked/failed/close
   }
 });
 
-test("scope refusals: deny list (exit 1), missing --reason (exit 2), EGM trigger on working (exit 1)", () => {
+test("scope refusals: deny list (exit 1), missing --reason (exit 2), EGM trigger on working (exit 1)", { timeout: 30_000 }, () => {
   const c = mk();
   const cr = board(c, "create", "scope-deny", "--mandate", c.mandate, "--scope", "bin/a.mjs");
   assert.equal(cr.status, 0, cr.stderr);
@@ -2066,7 +2066,7 @@ test("scope refusals: deny list (exit 1), missing --reason (exit 2), EGM trigger
   assert.deepEqual(JSON.parse(bytes(ticketFile(c, "scope-deny"))).scope, ["bin/a.mjs"], "refusals wrote nothing");
 });
 
-test("scope on a queued ticket adds an EGM trigger and re-pends; on working it refuses", () => {
+test("scope on a queued ticket adds an EGM trigger and re-pends; on working it refuses", { timeout: 30_000 }, () => {
   const c = mk();
   const cr = board(c, "create", "scope-egm", "--mandate", c.mandate, "--scope", "bin/a.mjs");
   assert.equal(cr.status, 0, cr.stderr);

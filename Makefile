@@ -26,13 +26,14 @@ test:  ## Run test suite (stop on first failure; waits for the box-wide suite lo
 	@if [ "$${FROOD_SUITE_LOCK_HELD:-0}" = "1" ]; then exec $(PYTEST) tests/ -x -q; fi; \
 	. "$(CURDIR)/orchestrator/ops/workstation/suite-lock.sh"; \
 	suite_lock_acquire "frood make test ($(CURDIR))" || exit 1; \
-	cleanup_term() { kill -TERM $$pid 2>/dev/null; \
+	pid=; \
+	cleanup_term() { if [ -n "$$pid" ]; then kill -TERM $$pid 2>/dev/null; \
 	  i=0; while kill -0 $$pid 2>/dev/null && [ $$i -lt 20 ]; do sleep 0.1; i=$$((i+1)); done; \
-	  kill -KILL $$pid 2>/dev/null; wait $$pid 2>/dev/null; \
+	  kill -KILL $$pid 2>/dev/null; wait $$pid 2>/dev/null; fi; \
 	  suite_lock_release; exit 143; }; \
-	cleanup_int() { kill -TERM $$pid 2>/dev/null; \
+	cleanup_int() { if [ -n "$$pid" ]; then kill -TERM $$pid 2>/dev/null; \
 	  i=0; while kill -0 $$pid 2>/dev/null && [ $$i -lt 20 ]; do sleep 0.1; i=$$((i+1)); done; \
-	  kill -KILL $$pid 2>/dev/null; wait $$pid 2>/dev/null; \
+	  kill -KILL $$pid 2>/dev/null; wait $$pid 2>/dev/null; fi; \
 	  suite_lock_release; exit 130; }; \
 	trap cleanup_term TERM; trap cleanup_int INT; \
 	FROOD_SUITE_LOCK_HELD=1 $(PYTEST) tests/ -x -q & pid=$$!; \
