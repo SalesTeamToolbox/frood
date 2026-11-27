@@ -1429,6 +1429,117 @@ test("origin/ base: fetch succeeds and base is an ancestor of HEAD -> runs", () 
   assert.equal(r.status, 0, r.stdout + r.stderr);
 });
 
+test("dirty tree: --role worker (expands to worker-nvidia) refuses with exit 10 before queued/spawn", () => {
+  const { h, sd } = streamHome();
+  const { dir: workdir, head } = makeRepo();
+  fs.writeFileSync(path.join(workdir, "a.txt"), "modified\n"); // tracked file modified => dirty
+  const prompt = path.join(workdir, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  const runDir = path.join(workdir, "run");
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(path.join(runDir, "ticket.json"), JSON.stringify({ ticket: "m6a", worktree: runDir, base: head }));
+  const out = path.join(runDir, "worker-r1.md");
+  const argsFile = path.join(workdir, "args.json");
+  const r = spawnSync(process.execPath, [BIN, "--role", "worker", "--dir", workdir, "--prompt", prompt, "--out", out, "--stream", "m6a"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: h, FAKE_OC_ARGS_FILE: argsFile },
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 10, r.stdout + r.stderr);
+  assert.match(r.stderr, /oc-worker: dirty tree/);
+  assert.ok(!fs.existsSync(r.argsFile), "opencode must not be spawned");
+  assert.deepEqual(eventsOf(sd), [], "no queued event appended");
+});
+
+test("dirty tree: --agent worker-nvidia refuses with exit 10 before queued/spawn", () => {
+  const { h, sd } = streamHome();
+  const { dir: workdir, head } = makeRepo();
+  fs.writeFileSync(path.join(workdir, "a.txt"), "modified\n"); // tracked file modified => dirty
+  const prompt = path.join(workdir, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  const runDir = path.join(workdir, "run");
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(path.join(runDir, "ticket.json"), JSON.stringify({ ticket: "m6a", worktree: runDir, base: head }));
+  const out = path.join(runDir, "worker-r1.md");
+  const argsFile = path.join(workdir, "args.json");
+  const r = spawnSync(process.execPath, [BIN, "--agent", "worker-nvidia", "--dir", workdir, "--prompt", prompt, "--out", out, "--stream", "m6a"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: h, FAKE_OC_ARGS_FILE: argsFile },
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 10, r.stdout + r.stderr);
+  assert.match(r.stderr, /oc-worker: dirty tree/);
+  assert.ok(!fs.existsSync(r.argsFile), "opencode must not be spawned");
+  assert.deepEqual(eventsOf(sd), [], "no queued event appended");
+});
+
+test("origin/ base: failed fetch warns but the run continues (exit 0)", () => {
+  const { h, sd } = streamHome();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "orch-ocw-origin-fail-"));
+  CLEAN.push(root);
+  const git = (cwd, ...args) => spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
+  const origin = path.join(root, "origin");
+  fs.mkdirSync(origin);
+  git(origin, "init", "-b", "main");
+  git(origin, "config", "user.email", "t@t");
+  git(origin, "config", "user.name", "t");
+  fs.writeFileSync(path.join(origin, "o.txt"), "o\n");
+  git(origin, "add", "o.txt");
+  git(origin, "commit", "-m", "origin");
+  const workdir = path.join(root, "wt");
+  fs.mkdirSync(workdir);
+  git(workdir, "init", "-b", "main");
+  git(workdir, "config", "user.email", "t@t");
+  git(workdir, "config", "user.name", "t");
+  git(workdir, "remote", "add", "origin", origin);
+  git(workdir, "fetch", "origin");
+  git(workdir, "checkout", "-b", "dev", "origin/main");
+  fs.writeFileSync(path.join(workdir, ".gitignore"), "run/\n");
+  git(workdir, "add", ".gitignore");
+  git(workdir, "commit", "-m", "gitignore");
+  fs.writeFileSync(path.join(workdir, "a.txt"), "a\n");
+  git(workdir, "add", "a.txt");
+  git(workdir, "commit", "-m", "head");
+  // Remove the origin so the fetch fails while origin/main (remote-tracking) still resolves locally.
+  fs.rmSync(origin, { recursive: true, force: true });
+  const prompt = path.join(workdir, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  git(workdir, "add", prompt);
+  git(workdir, "commit", "-m", "prompt");
+  const runDir = path.join(workdir, "run");
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(path.join(runDir, "ticket.json"), JSON.stringify({ ticket: "m6a", worktree: runDir, base: "origin/main" }));
+  const out = path.join(runDir, "worker-r1.md");
+  const argsFile = path.join(workdir, "args.json");
+  const r = spawnSync(process.execPath, [BIN, "--agent", "worker", "--dir", workdir, "--prompt", prompt, "--out", out, "--stream", "m6a"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: h, FAKE_OC_ARGS_FILE: argsFile },
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /oc-worker: fetch origin main failed/, "fetch warning present: " + r.stderr);
+  assert.ok(fs.existsSync(argsFile), "opencode was spawned: the run continued after the failed fetch");
+  const ev = eventsOf(sd);
+  assert.deepEqual(ev.map((e) => e.key), ["run:m6a/worker-r1:queued", "run:m6a/worker-r1:done"]);
+});
+
+test("origin/-x base: option-like ref refused with exit 10 before any git call", () => {
+  const { h, sd } = streamHome();
+  const { dir: workdir, head } = makeRepo();
+  const prompt = path.join(workdir, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  const runDir = path.join(workdir, "run");
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(path.join(runDir, "ticket.json"), JSON.stringify({ ticket: "m6a", worktree: runDir, base: "origin/-x" }));
+  const out = path.join(runDir, "worker-r1.md");
+  const argsFile = path.join(workdir, "args.json");
+  const r = spawnSync(process.execPath, [BIN, "--agent", "worker", "--dir", workdir, "--prompt", prompt, "--out", out, "--stream", "m6a"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: h, FAKE_OC_ARGS_FILE: argsFile },
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 10, r.stdout + r.stderr);
+  assert.ok(!/fetch origin/.test(r.stderr), "no fetch warning for an option-like base: " + r.stderr);
+  assert.ok(!fs.existsSync(r.argsFile), "opencode must not be spawned");
+  assert.deepEqual(eventsOf(sd), [], "no queued event appended");
+});
+
 test("O4: both receipt writes go through atomicWrite", () => {
   const src = fs.readFileSync(BIN, "utf8");
   assert.equal((src.match(/atomicWrite\([^\n]*receipt\.json/g) || []).length, 2);
@@ -1671,6 +1782,42 @@ test("grace: silent run is killed at the deadline, no extension", () => {
   assert.equal(receipt.extended_min, undefined, "silent run must not be extended");
 });
 
+test("sleep: a host sleep (SIGSTOP) past the original deadline extends it and records slept_ms", { skip: process.platform !== "linux", timeout: 90000 }, async () => {
+  const dir = tmp();
+  CLEAN.push(dir);
+  const mandate = path.join(dir, "mandate.md");
+  fs.writeFileSync(mandate, "Do the work.");
+  const out = path.join(dir, "out", "worker-r1.md");
+  const argsFile = path.join(dir, "args.json");
+  const timeoutMin = 0.1; // 6 s original deadline
+  const originalDeadlineMs = timeoutMin * 60000;
+  const child = spawn(process.execPath, [BIN, "--agent", "critic", "--dir", dir, "--prompt", mandate, "--out", out, "--timeout-min", String(timeoutMin), "--grace-min", "0", "--resume", "0"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: dir, FAKE_OC_ARGS_FILE: argsFile, FAKE_OC_MODE: "hang" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const start = Date.now();
+  const exited = new Promise((res) => child.on("close", (code, signal) => res({ code, signal, at: Date.now() - start })));
+  const hard = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 90000);
+  try {
+    for (let i = 0; i < 100 && !fs.existsSync(argsFile); i++) await sleep(100);
+    assert.ok(fs.existsSync(argsFile), "the fake agent started");
+    await sleep(300); // let the watchdog arm its deadline timer
+    // Freeze oc-worker's own event loop past the 30 s sleep threshold and past the original deadline.
+    process.kill(child.pid, "SIGSTOP");
+    await sleep(36_000);
+    process.kill(child.pid, "SIGCONT");
+    const { code, at } = await exited;
+    clearTimeout(hard);
+    // It must not have died at the original deadline (it was frozen then); it ends later.
+    assert.ok(at > originalDeadlineMs + 20_000, `ended at ${at} ms, not past the original deadline ${originalDeadlineMs} ms`);
+    const receipt = JSON.parse(fs.readFileSync(out + ".receipt.json", "utf8"));
+    assert.ok(receipt.slept_ms > 0, `slept_ms must be > 0, got ${receipt.slept_ms}`);
+  } finally {
+    clearTimeout(hard);
+    if (child.exitCode === null) { try { process.kill(child.pid, "SIGKILL"); } catch {} }
+  }
+});
+
 test("grace: --grace-min 0 disables the extension", () => {
   const dir = tmp();
   CLEAN.push(dir);
@@ -1754,11 +1901,12 @@ test("sleepExtensionMs: a 10-minute sleep gap is given back minus one tick, capp
   assert.equal(over.total, capMs, "total stays at the cap");
 });
 
-// sleepGapMs arithmetic: a single raw gap can exceed 2 h, which runWorker caps via sleepExtensionMs.
-test("sleepGapMs: a raw 3 h gap exceeds the 2 h cap (runWorker caps total via sleepExtensionMs)", () => {
+// sleepGapMs itself is uncapped: a raw 3 h gap is returned as-is; runWorker caps the accumulated
+// extension via sleepExtensionMs (see the :1735 test).
+test("sleepGapMs: a raw 3 h gap is returned uncapped; runWorker caps total via sleepExtensionMs", () => {
   const now = 1_000_000_000_000;
   const threeHoursMs = 3 * 60 * 60 * 1000;
-  assert.ok(sleepGapMs(now - threeHoursMs, now, 5000) > 2 * 60 * 60 * 1000, "raw 3 h gap exceeds the 2 h cap");
+  assert.ok(sleepGapMs(now - threeHoursMs, now, 5000) > 2 * 60 * 60 * 1000, "raw 3 h gap is returned uncapped");
 });
 
 // ---------------------------------------------------------------- small-edit footer
@@ -2250,7 +2398,7 @@ test("nvidia cap: an nvidia rate-limit classified by oc-worker is recorded in th
 const pidAlive = (pid) => {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; }
 };
-async function startHung(extraFlags = [], extraEnv = {}) {
+async function startHung({ stream, extraFlags = [], extraEnv = {} } = {}) {
   const home = tmp();
   CLEAN.push(home);
   const prompt = path.join(home, "mandate.md");
@@ -2260,7 +2408,15 @@ async function startHung(extraFlags = [], extraEnv = {}) {
   fs.writeFileSync(path.join(runDir, "ticket.json"), JSON.stringify({ ticket: "m6a", worktree: runDir }));
   const out = path.join(runDir, "worker-r1.md");
   const argsFile = path.join(home, "args.json");
-  const child = spawn(process.execPath, [BIN, "--agent", "critic", "--dir", home, "--prompt", prompt, "--out", out, "--slots", "2", ...extraFlags], {
+  const flags = ["--agent", "critic", "--dir", home, "--prompt", prompt, "--out", out, "--slots", "2", ...extraFlags];
+  let sd;
+  if (stream) {
+    sd = path.join(home, ".config", "orchestrator", "streams");
+    fs.mkdirSync(sd, { recursive: true });
+    fs.writeFileSync(path.join(sd, `${stream}.json`), JSON.stringify({ name: stream, repo: "", plan: "", status: "active", next: "x", done: "", waiting: "", written_at: new Date().toISOString(), written_by: "", consumed_at: null, done_at: null }));
+    flags.push("--stream", stream);
+  }
+  const child = spawn(process.execPath, [BIN, ...flags], {
     env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_HOME: home, FAKE_OC_MODE: "hang", FAKE_OC_ARGS_FILE: argsFile, ...extraEnv },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -2277,7 +2433,7 @@ async function startHung(extraFlags = [], extraEnv = {}) {
     if (agentPid && pidAlive(agentPid)) { try { process.kill(agentPid, "SIGKILL"); } catch {} }
     if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch {} }
   };
-  return { home, out, child, exited, agentPid, cleanup, stderr: () => stderr, sd: path.join(home, ".config", "orchestrator", "streams") };
+  return { home, out, child, exited, agentPid, cleanup, stderr: () => stderr, sd };
 }
 
 for (const [signal, code] of [["SIGTERM", 143], ["SIGINT", 130], ["SIGHUP", 129]]) {
@@ -2306,7 +2462,7 @@ for (const [signal, code] of [["SIGTERM", 143], ["SIGINT", 130], ["SIGHUP", 129]
 test("SIGTERM with --stream appends one run-done for the killed run", async () => {
 
 
-  const probe = await startHungStream();
+  const probe = await startHung({ stream: "m6a" });
   try {
     assert.ok(probe.agentPid, probe.stderr());
     probe.child.kill("SIGTERM");
@@ -2321,39 +2477,6 @@ test("SIGTERM with --stream appends one run-done for the killed run", async () =
     probe.cleanup();
   }
 });
-async function startHungStream() {
-  // same as startHung, but the home also holds the stream the run reports to
-  const home = tmp();
-  CLEAN.push(home);
-  const sd = path.join(home, ".config", "orchestrator", "streams");
-  fs.mkdirSync(sd, { recursive: true });
-  fs.writeFileSync(path.join(sd, "m6a.json"), JSON.stringify({ name: "m6a", repo: "", plan: "", status: "active", next: "x", done: "", waiting: "", written_at: new Date().toISOString(), written_by: "", consumed_at: null, done_at: null }));
-  const prompt = path.join(home, "mandate.md");
-  fs.writeFileSync(prompt, "Do the thing.");
-  const runDir = path.join(home, "run");
-  fs.mkdirSync(runDir, { recursive: true });
-  fs.writeFileSync(path.join(runDir, "ticket.json"), JSON.stringify({ ticket: "m6a", worktree: runDir }));
-  const out = path.join(runDir, "worker-r1.md");
-  const argsFile = path.join(home, "args.json");
-  const child = spawn(process.execPath, [BIN, "--agent", "critic", "--dir", home, "--prompt", prompt, "--out", out, "--stream", "m6a", "--slots", "2"], {
-    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_HOME: home, FAKE_OC_MODE: "hang", FAKE_OC_ARGS_FILE: argsFile },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let stderr = "";
-  child.stderr.on("data", (d) => (stderr += d));
-  const exited = new Promise((res) => child.on("close", (code, signal) => res({ code, signal })));
-  const hard = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 40000);
-  let agentPid = null;
-  for (let i = 0; i < 200 && !agentPid; i++) {
-    try { agentPid = JSON.parse(fs.readFileSync(argsFile, "utf8")).pid; } catch { await sleep(100); }
-  }
-  const cleanup = () => {
-    clearTimeout(hard);
-    if (agentPid && pidAlive(agentPid)) { try { process.kill(agentPid, "SIGKILL"); } catch {} }
-    if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch {} }
-  };
-  return { home, out, child, exited, agentPid, cleanup, stderr: () => stderr, sd };
-}
 
 test("SIGTERM while waiting for a held slot exits and leaves no slot of its own", async () => {
   const home = tmp();
@@ -2379,6 +2502,80 @@ test("SIGTERM while waiting for a held slot exits and leaves no slot of its own"
     assert.ok(res.code !== 0, "exits non-zero");
     assert.deepEqual(fs.readdirSync(slots), ["slot-1"], "only the foreign holder's slot remains");
     assert.ok(!fs.existsSync(path.join(home, "out", "f.md.receipt.json")), "no receipt: nothing ran");
+  } finally {
+    clearTimeout(hard);
+    if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch {} }
+  }
+});
+
+test("A1: SIGTERM while waiting for a machine slot with the Nvidia provider slot taken releases both and exits 143, no receipt", async () => {
+  const home = tmp();
+  CLEAN.push(home);
+  const slots = slotDir_(home);
+  // The only machine slot is held by this live test process, so the run parks in acquireSlot.
+  fs.mkdirSync(path.join(slots, "slot-1"), { recursive: true });
+  fs.writeFileSync(path.join(slots, "slot-1", "owner"), JSON.stringify({ pid: process.pid, since: new Date().toISOString() }));
+  const prompt = path.join(home, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  const out = path.join(home, "out", "f.md");
+  const argsFile = path.join(home, "args.json");
+  const child = spawn(process.execPath, [BIN, "--agent", "worker-nvidia", "--model", "nvidia/test-model", "--dir", home, "--prompt", prompt, "--out", out, "--slots", "1"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_HOME: home, FAKE_OC_ARGS_FILE: argsFile, FAKE_OC_MODE: "hang", ORCH_NVIDIA_POLL_MS: "50" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const exited = new Promise((res) => child.on("close", (code, signal) => res({ code, signal })));
+  const hard = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 30000);
+  try {
+    await sleep(2500); // let it take the provider slot and park waiting for the machine slot
+    assert.equal(child.exitCode, null, "still waiting for the machine slot");
+    const nvidiaSlots = fs.readdirSync(slots).filter((n) => /^provider-nvidia-\d+$/.test(n));
+    assert.equal(nvidiaSlots.length, 1, `provider slot taken: ${JSON.stringify(nvidiaSlots)}`);
+    child.kill("SIGTERM");
+    const res = await exited;
+    assert.equal(res.code, 143, `expected exit 143, got ${JSON.stringify(res)}`);
+    // provider slot released at once (not merely stale for dead-pid reclaim)
+    assert.equal(fs.readdirSync(slots).filter((n) => /^provider-nvidia-\d+$/.test(n)).length, 0, "provider slot dir gone");
+    assert.deepEqual(fs.readdirSync(slots).filter((n) => /^slot-\d+$/.test(n)), ["slot-1"], "only the foreign holder's machine slot remains");
+    assert.ok(!fs.existsSync(out + ".receipt.json"), "no receipt: nothing ran");
+    const runs = path.join(home, ".config", "orchestrator", "runs");
+    assert.deepEqual(fs.readdirSync(runs).filter(Boolean), [], "no registry file left after the signal");
+  } finally {
+    clearTimeout(hard);
+    if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch {} }
+  }
+});
+
+test("A2: SIGTERM after a clean attempt leaves the clean receipt (exit 0, no killed)", async () => {
+  const home = tmp();
+  CLEAN.push(home);
+  const prompt = path.join(home, "mandate.md");
+  fs.writeFileSync(prompt, "Review the diff.");
+  const out = path.join(home, "out", "findings-r1.md");
+  const argsFile = path.join(home, "args.json");
+  // Clean attempt (default fake "ok"), then a postrun pause once <out> exists so the test can land SIGTERM
+  // after the loop. The clean receipt must survive the signal.
+  const child = spawn(process.execPath, [BIN, "--agent", "critic", "--dir", home, "--prompt", prompt, "--out", out], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: home, FAKE_OC_ARGS_FILE: argsFile, ORCH_TEST_POSTRUN_PAUSE_MS: "4000" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.on("data", (d) => (stderr += d));
+  const exited = new Promise((res) => child.on("close", (code, signal) => res({ code, signal })));
+  const hard = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 30000);
+  try {
+    // wait for <out> (written after the clean attempt) then SIGTERM during the pause
+    for (let i = 0; i < 100 && !fs.existsSync(out); i++) await sleep(50);
+    assert.ok(fs.existsSync(out), `<out> written by the clean attempt: ${stderr}`);
+    await sleep(150); // let it enter the postrun pause
+    assert.equal(child.exitCode, null, "oc-worker still paused after <out>");
+    child.kill("SIGTERM");
+    const res = await exited;
+    assert.equal(res.code, 0, `expected clean exit 0, got ${JSON.stringify(res)}: ${stderr}`);
+    const receipt = JSON.parse(fs.readFileSync(out + ".receipt.json", "utf8"));
+    assert.notEqual(receipt.exit, "killed", `exit must not be killed: ${JSON.stringify(receipt)}`);
+    assert.ok(!receipt.errors.some((e) => /killed by /.test(e)), `no 'killed by' error: ${JSON.stringify(receipt.errors)}`);
+    assert.equal(receipt.exit, 0);
+    assert.ok(!receipt.errors.some((e) => /killed by/.test(e)), "no killed-by marker");
   } finally {
     clearTimeout(hard);
     if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch {} }
@@ -2608,7 +2805,7 @@ function pidGone(pid, ms = 3000) {
   return false;
 }
 
-test("inhibitor: spawned with --what=idle:handle-lid-switch --mode=block; argv never names sleep:; pid released after a clean run", () => {
+test("inhibitor: spawned with --what=idle:handle-lid-switch --mode=block; argv never names sleep:; pid released after a clean run", { skip: process.platform === "win32" }, () => {
   const dir = tmp();
   CLEAN.push(dir);
   const record = path.join(dir, "inhibit.json");
@@ -2626,10 +2823,27 @@ test("inhibitor: spawned with --what=idle:handle-lid-switch --mode=block; argv n
   assert.ok(logged.argv.includes("sleep"), JSON.stringify(logged));
   assert.ok(!logged.argv.includes("--what=sleep"), JSON.stringify(logged));
   assert.ok(!logged.argv.some((a) => a.includes("sleep:")), JSON.stringify(logged));
+  // D3: --timeout-min 1 with default grace 15 => (1+15+5)*60 = 1260 s.
+  assert.equal(logged.argv.at(-1), "1260", `inhibitor duration should be 1260 s, got ${JSON.stringify(logged.argv)}`);
   assert.ok(pidGone(Number(logged.pid)), `inhibitor pid ${logged.pid} still alive after clean run`);
 });
 
-test("inhibitor: pid released after a timed-out run", () => {
+test("inhibitor: --grace-min sets the duration (--timeout-min 1 --grace-min 2 => 480 s)", { skip: process.platform === "win32" }, () => {
+  const dir = tmp();
+  CLEAN.push(dir);
+  const record = path.join(dir, "inhibit.json");
+  const fake = fakeInhibit(dir);
+  const prompt = path.join(dir, "mandate.md");
+  fs.writeFileSync(prompt, "Review the diff.");
+  const r = run({ INHIBIT_RECORD_FILE: record, ORCH_INHIBIT_BIN: fake }, "--timeout-min", "1", "--grace-min", "2");
+  assert.equal(r.status, 0, r.stderr);
+  const logged = waitForRecord(record);
+  assert.ok(logged, "inhibitor never recorded");
+  assert.equal(logged.argv.at(-1), "480", `inhibitor duration should be 480 s, got ${JSON.stringify(logged.argv)}`);
+  assert.ok(pidGone(Number(logged.pid)), `inhibitor pid ${logged.pid} still alive after clean run`);
+});
+
+test("inhibitor: pid released after a timed-out run", { skip: process.platform === "win32" }, () => {
   const dir = tmp();
   CLEAN.push(dir);
   const record = path.join(dir, "inhibit.json");
@@ -2644,7 +2858,7 @@ test("inhibitor: pid released after a timed-out run", () => {
   assert.ok(pidGone(Number(logged.pid)), `inhibitor pid ${logged.pid} still alive after timeout`);
 });
 
-test("inhibitor: pid released after SIGTERM to oc-worker", async () => {
+test("inhibitor: pid released after SIGTERM to oc-worker", { skip: process.platform === "win32" }, async () => {
   const dir = tmp();
   CLEAN.push(dir);
   const record = path.join(dir, "inhibit.json");
@@ -2656,6 +2870,7 @@ test("inhibitor: pid released after SIGTERM to oc-worker", async () => {
     env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: dir, INHIBIT_RECORD_FILE: record, ORCH_INHIBIT_BIN: fake, FAKE_OC_MODE: "hang" },
     encoding: "utf8",
   });
+  const hard = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 30000);
   const logged = waitForRecord(record);
   assert.ok(logged, "inhibitor never recorded");
   assert.ok(child.exitCode === null && child.signalCode === null, "oc-worker exited before the inhibitor was recorded");
@@ -2664,11 +2879,46 @@ test("inhibitor: pid released after SIGTERM to oc-worker", async () => {
     if (child.exitCode !== null || child.signalCode !== null) res({ code: child.exitCode, signal: child.signalCode });
     else child.once("exit", (c, s) => res({ code: c, signal: s }));
   });
+  clearTimeout(hard);
   assert.ok(code === 143 || signal === "SIGTERM", `oc-worker exited with code ${code} signal ${signal}`);
   assert.ok(pidGone(Number(logged.pid)), `inhibitor pid ${logged.pid} still alive after SIGTERM`);
 });
 
-test("inhibitor: ORCH_NO_INHIBIT=1 spawns nothing and the run succeeds", () => {
+test("inhibitor: a throw in the setup gap releases the inhibitor and the slots (D1)", { skip: process.platform === "win32" }, async () => {
+  const dir = tmp();
+  CLEAN.push(dir);
+  const record = path.join(dir, "inhibit.json");
+  const fake = fakeInhibit(dir);
+  const prompt = path.join(dir, "mandate.md");
+  fs.writeFileSync(prompt, "Review the diff.");
+  // cc-critic needs its role contract (~/.claude/agents/critic.md). Replicate it under ORCH_HOME so
+  // ccContract resolves it, then make --out read-only so atomicWrite(contractFile) throws EACCES in the
+  // setup gap (after startInhibitor, before any spawn) — uncaught, so runWorker's finally releases the
+  // inhibitor and the slots.
+  const agentDir = path.join(dir, ".claude", "agents");
+  fs.mkdirSync(agentDir, { recursive: true });
+  fs.copyFileSync(path.join(os.homedir(), ".claude", "agents", "critic.md"), path.join(agentDir, "critic.md"));
+  const outDir = path.join(dir, "out");
+  fs.mkdirSync(outDir, { recursive: true });
+  fs.chmodSync(outDir, 0o555);
+  const out = path.join(outDir, "findings-r1.md");
+  const child = spawn(process.execPath, [BIN, "--agent", "cc-critic", "--no-detach", "--dir", dir, "--prompt", prompt, "--out", out], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: dir, INHIBIT_RECORD_FILE: record, ORCH_INHIBIT_BIN: fake },
+    encoding: "utf8",
+  });
+  const { code } = await new Promise((res) => child.on("close", (c) => res({ code: c })));
+  assert.ok(code !== 0, `expected a non-zero exit from the setup throw, got ${code}`);
+  // D1 core: release() runs in the finally, so the machine slot is freed even though setup threw.
+  assert.deepEqual(fs.readdirSync(slotDir_(dir)), [], "no slot dir left after the setup throw");
+  // If the fake inhibitor managed to record before oc-worker exited, its pid must be gone now.
+  let logged;
+  try { logged = JSON.parse(fs.readFileSync(record, "utf8")); } catch { logged = null; }
+  if (logged) assert.ok(pidGone(Number(logged.pid)), `inhibitor pid ${logged.pid} still alive after the setup throw`);
+  // restore perms so CLEAN can remove the dir
+  try { fs.chmodSync(outDir, 0o755); } catch {}
+});
+
+test("inhibitor: ORCH_NO_INHIBIT=1 spawns nothing and the run succeeds", { skip: process.platform === "win32" }, () => {
   const dir = tmp();
   CLEAN.push(dir);
   const record = path.join(dir, "inhibit.json");
@@ -2680,7 +2930,7 @@ test("inhibitor: ORCH_NO_INHIBIT=1 spawns nothing and the run succeeds", () => {
   assert.ok(!fs.existsSync(record), "inhibitor was spawned with ORCH_NO_INHIBIT=1");
 });
 
-test("inhibitor: systemd-inhibit missing from PATH warns on stderr but the run succeeds", () => {
+test("inhibitor: systemd-inhibit missing from PATH warns on stderr but the run succeeds", { skip: process.platform === "win32" }, () => {
   const dir = tmp();
   CLEAN.push(dir);
   const nodir = path.join(dir, "no-bin");
