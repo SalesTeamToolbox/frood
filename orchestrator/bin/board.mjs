@@ -32,7 +32,9 @@
 //          (ready -> working after the train refused the sha: every live signoff is invalidated, the round cap
 //           and gate results are cleared, the round cap starts a fresh lap of 3, at most 2 reopens per ticket;
 //           history and counted rounds are kept. The senior trigger "counted rounds > 2" stays cumulative, so a
-//           ticket reopened after 3 rounds needs a senior; base_sha is not refreshed on a rebase)
+//           ticket reopened after 3 rounds needs a senior; base_sha is not refreshed on a rebase — the scope
+//           fence diffs from the newest merge-base of the branch with the adapter base ref or its local
+//           branch when that is a descendant of base_sha, else from base_sha itself)
 //   --help  (or -h) prints this text and exits 0; nothing is written
 //
 // Repo root = parent of `git rev-parse --git-common-dir` from --repo/cwd, so it works from any worktree.

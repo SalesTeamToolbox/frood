@@ -1992,7 +1992,7 @@ async function doCritic(stream, key, events, ticketPath, out, findings, round) {
       // A diff that cannot be computed names no path: fail closed to the owner rather than write an empty
       // findings file that would resume the worker with nothing to fix.
       if (!fence.ok && !reasons.length) {
-        dpage(stream, key, `scope-check-failed ${fenceIn.base}..${head} in ${ticket.worktree}`);
+        dpage(stream, key, `scope-check-failed ${fence.from || fenceIn.base}..${head} in ${ticket.worktree}`);
         return { stream, key, line: "", outcome: "paged" };
       }
       if (reasons.length) {

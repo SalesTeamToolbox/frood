@@ -50,9 +50,12 @@ exports `checkScope({ repo, base, sha, scope })`:
   says why);
 - the diff uses `-z`, so a non-ASCII path is not quoted past the deny list;
 - with `baseRef` (the adapter's `base`, passed by `board round`/`ready` and by the desk when it can read the repo's
-  `adapter.json`), it diffs from M = `merge-base(baseRef, sha)` when the ticket base is an ancestor of M (a branch
-  rebased onto a newer main), and otherwise from the ticket base (a base ref that lags it). `from` names the commit
-  used. A missing or unresolvable base ref diffs from the ticket base.
+  `adapter.json`), let M = `merge-base(ref, sha)` for `ref = baseRef`, and — when `baseRef` is `<remote>/<branch>` and
+  `refs/remotes/<baseRef>` resolves — also for `ref = <branch>` (the local counterpart). A candidate M is accepted
+  only when the ticket base is an ancestor of M and M ≠ sha (an already-merged branch would diff empty and pass
+  vacuously). The fence diffs from the newest accepted M (when both are accepted, the one the other is an ancestor
+  of), else from the ticket base. `from` names the commit used. A missing or unresolvable base ref diffs from the
+  ticket base.
 
 `matchAny`/`matchGlob` live in `scope-check.mjs`; `board.mjs` imports them back for `seniorFor` and the EGM trigger.
 There is exactly one glob matcher.
@@ -63,9 +66,9 @@ The four gates:
   grants an open-ended ("any doc", "any file", "as needed", "any other", "wherever") unless that sentence names exact
   paths and each of them is in `--scope`. A `## Scope` section runs to the next heading of the same or a higher level
   (sub-headings and bold labels stay inside it), and a negated phrase ("never edit any file outside X") is no grant. Refusal: `board: mandate scope is open-ended: "<sentence>"`.
-- **`board round`** — before recording a done round it fences `base_sha..--reviewed-sha`. When the fence fails the
-  recorded critic is `effective: CHANGES_REQUESTED` with one `out of scope: <path>` / `denied path: <path>` reason per
-  path; the round still counts, and a critic `APPROVED` cannot override it.
+- **`board round`** — before recording a done round it fences `<from>..--reviewed-sha` with `<from>` per the rule
+  above. When the fence fails the recorded critic is `effective: CHANGES_REQUESTED` with one `out of scope: <path>` /
+  `denied path: <path>` reason per path; the round still counts, and a critic `APPROVED` cannot override it.
 - **`board ready`** — refuses when the signed-off sha leaves the scope. This is the backstop for rounds recorded
   before the fence existed.
 - **`doCritic`** — before writing the critic prompt it fences the worker's committed sha. On a failure it writes
