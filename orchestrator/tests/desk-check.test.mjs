@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { check } from "../bin/desk-check.mjs";
+import { check, ledgerTick } from "../bin/desk-check.mjs";
 import { appendAck, appendEvent, orchRoot } from "../bin/handoff.mjs";
 import { processStart } from "../bin/proc-tree.mjs";
 
@@ -33,6 +33,8 @@ function mkStream(h, name = "m6a") {
 }
 // desk-check imports the Claude statusline sidecar each tick; never let a test read the real one.
 process.env.CC_SIDECAR = path.join(os.tmpdir(), "no-such-cc-sidecar.json");
+// desk-check scans the Claude transcript ledger each tick; never let a test read the real transcripts.
+process.env.ORCH_CC_PROJECTS = path.join(os.tmpdir(), "no-such-cc-projects");
 function inHome(h, fn) {
   const saved = process.env.ORCH_HOME;
   process.env.ORCH_HOME = h;
@@ -168,4 +170,19 @@ test("desk-check syncs a holder tab to its stream's work (best effort, exit code
     child.send("dump");
   });
   assert.deepEqual(titles, ["[m6a] sales-team-toolbox: m3 — pipeline"], JSON.stringify(titles));
+});
+
+test("ledgerTick: calls the cc-ledger scan once with budgetMs 5000; a throwing scan is swallowed", () => {
+  const calls = [];
+  const res = { counted: 3 };
+  assert.equal(ledgerTick({ scan: (o) => (calls.push(o), res) }), res);
+  assert.deepEqual(calls, [{ budgetMs: 5000 }]);
+  assert.equal(ledgerTick({ scan: () => { throw new Error("boom"); } }), null);
+});
+
+test("ledgerTick (real scan, hermetic): writes the ledger under ORCH_HOME and never throws", () => {
+  const h = home();
+  const r = inHome(h, () => ledgerTick());
+  assert.ok(r && typeof r === "object" && r.partial === false, JSON.stringify(r));
+  assert.ok(fs.existsSync(path.join(h, ".config", "orchestrator", "cc-ledger.json")));
 });

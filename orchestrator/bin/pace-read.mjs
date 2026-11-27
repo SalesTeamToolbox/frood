@@ -48,7 +48,16 @@ export function paceChain(role, chain, pace) {
 
 const num = (v) => (Number.isFinite(v) ? v : null);
 
-/** The receipt's cc_pace: { state, weekly, projected, at, prepended }; absent values are null. */
+/**
+ * The ledger shadow (cc-pacing-v2 A2) for a receipt: {nowcast_weekly, ledger_rate} from a pace's `ledger`, or from a
+ * record's own `shadow` (a detached child re-records the launcher's cc_pace); null when neither is an object.
+ */
+function shadowOf(p) {
+  const src = p.ledger && typeof p.ledger === "object" ? p.ledger : p.shadow && typeof p.shadow === "object" ? p.shadow : null;
+  return src ? { nowcast_weekly: num(src.nowcast_weekly), ledger_rate: num(src.ledger_rate) } : null;
+}
+
+/** The receipt's cc_pace: { state, weekly, projected, at, prepended, shadow }; absent values are null. Shadow only: never routes. */
 export function ccPaceRecord(pace, prepended = false) {
   const p = pace && typeof pace === "object" ? pace : {};
   return {
@@ -57,5 +66,6 @@ export function ccPaceRecord(pace, prepended = false) {
     projected: num(p.projected),
     at: typeof p.at === "string" ? p.at : null,
     prepended: prepended === true,
+    shadow: shadowOf(p),
   };
 }

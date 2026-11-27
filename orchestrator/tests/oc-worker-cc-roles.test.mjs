@@ -129,7 +129,7 @@ test("cc.models from usage-limits.json merges over the default; capReader reads 
 });
 
 test("paceDecision carries fable_over only when set (the round-trip without it is unchanged)", () => {
-  const cc_pace = { state: "on", weekly: 1, projected: 2, at: "t", prepended: false };
+  const cc_pace = { state: "on", weekly: 1, projected: 2, at: "t", prepended: false, shadow: null };
   assert.deepEqual(paceDecision(JSON.stringify({ cc_pace, chain: null })), { cc_pace, chain: null });
   assert.deepEqual(paceDecision(JSON.stringify({ cc_pace, chain: null, fable_over: true })), { cc_pace, chain: null, fable_over: true });
 });

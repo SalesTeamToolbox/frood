@@ -8,6 +8,8 @@
 // `status` prints ONE line (<= 100 chars, no leading "pace": workers-view prefixes it) and exits 0 for every
 // state. Last state (hysteresis only) lives in <orchDir()>/cc-pace-state.json, rewritten atomically on change.
 // Env: ORCH_NO_PACE=1 -> off. Exit 2 on unknown commands/flags. No network, no child processes.
+// `--json` also carries `line` (the text line) and `ledger` (shadow nowcast from cc-ledger.json, read-only, or null);
+// neither changes the state, the text output or cc-pace-state.json (cc-pacing-v2 A2).
 //
 //   node cc-pace.mjs advise [--json] [--notify]   reset advice (M5); advise only, Frood never presses a reset
 //   node cc-pace.mjs reset-used full|fable|none   the owner pressed one: decrement usage-limits.json cc.resets + ack
@@ -19,21 +21,32 @@ import { fileURLToPath } from "node:url";
 import { orchDir, loadLimits } from "./usage.mjs";
 import { readLatest, readHistory } from "./cc-usage.mjs";
 import { listStreams } from "./handoff.mjs";
+import { DEFAULT_WEIGHTS, loadWeights, loadState as loadLedgerState, weighted, fit } from "./cc-ledger.mjs";
 import { shouldNotify, notifyNow } from "./session-pressure.mjs";
 
 const HOUR = 3600 * 1000;
 const WEEK_H = 168;
-export const DEFAULTS = Object.freeze({ enabled: true, weekly_reserve_pct: 20, reserve_floor_hours: 12, stale_hours: 2, margin: 5 });
+// ledger (cc-pacing-v2 A2): the transcript-ledger nowcast, shown beside the pace in `status --json` only. Shadow:
+// it never changes the state. `mode` is always "shadow" here (A5 adds "on").
+export const DEFAULTS = Object.freeze({
+  enabled: true, weekly_reserve_pct: 20, reserve_floor_hours: 12, stale_hours: 2, margin: 5,
+  ledger: Object.freeze({ weights: DEFAULT_WEIGHTS, fresh_minutes: 30, mode: "shadow" }),
+});
 
 /** Defaults overlaid with a (possibly partial or junk) cc config; non-numeric numbers fall back to the default. */
 export function withDefaults(cc) {
   const out = { ...DEFAULTS };
+  const ledger = { weights: loadWeights({ cc }), fresh_minutes: DEFAULTS.ledger.fresh_minutes, mode: "shadow" };
   if (cc && typeof cc === "object") {
     if (typeof cc.enabled === "boolean") out.enabled = cc.enabled;
     for (const k of ["weekly_reserve_pct", "reserve_floor_hours", "stale_hours", "margin"]) {
       if (Number.isFinite(cc[k])) out[k] = cc[k];
     }
+    if (cc.ledger && typeof cc.ledger === "object" && Number.isFinite(cc.ledger.fresh_minutes)) {
+      ledger.fresh_minutes = cc.ledger.fresh_minutes;
+    }
   }
+  out.ledger = ledger;
   return out;
 }
 
@@ -124,6 +137,46 @@ export function statusLine(r) {
     s = `${r.state.toUpperCase()} wk ${Math.round(r.weekly)}%→${Math.round(r.projected)}%${at} rsv ${Math.round(r.reserve)}% 5h ${Math.round(r.five_hour)}% fable ${fable}`;
   }
   return s.replace(/\s+/g, " ").slice(0, 100);
+}
+
+/** Σ w over ledger buckets whose start is in [t1, t2), each re-weighted from its raw counts (as cc-ledger fit does). */
+function ledgerW(buckets, weights, t1, t2) {
+  let w = 0;
+  for (const [b, fams] of Object.entries(buckets ?? {})) {
+    const t = Date.parse(b);
+    if (!Number.isFinite(t) || t < t1 || t >= t2 || !fams || typeof fams !== "object") continue;
+    for (const [f, c] of Object.entries(fams)) {
+      const v = weighted(c, f, weights);
+      if (Number.isFinite(v)) w += v;
+    }
+  }
+  return w;
+}
+
+/**
+ * Shadow nowcast (A2), pure. r: a paceState result; ledgerState: cc-ledger state ({scanned_at, buckets});
+ * snapshots: cc-usage records for the fit; cfg: a cc config (withDefaults applied here); now: ms.
+ * null when there is no ledger, it is older than cfg.ledger.fresh_minutes, k is null, or r.weekly/r.at are unusable.
+ * Else {k, rms, pairs, unmetered, scanned_at, nowcast_weekly, ledger_rate}:
+ * nowcast_weekly = max(weekly, weekly + k·w(since r.at)); ledger_rate = k·w(last 24 h)/24 (%/h).
+ */
+export function ledgerShadow(r, ledgerState, snapshots, cfg, now) {
+  if (!r || typeof r !== "object" || !ledgerState || typeof ledgerState !== "object") return null;
+  const c = withDefaults(cfg).ledger;
+  const scanned = ms(ledgerState.scanned_at);
+  if (!Number.isFinite(scanned) || !Number.isFinite(now) || now - scanned > c.fresh_minutes * 60 * 1000) return null;
+  const at = ms(r.at);
+  if (!Number.isFinite(r.weekly) || !Number.isFinite(at)) return null;
+  const buckets = ledgerState.buckets && typeof ledgerState.buckets === "object" ? ledgerState.buckets : {};
+  const f = fit(Array.isArray(snapshots) ? snapshots : [], buckets, { now, weights: c.weights });
+  if (f.k == null || !Number.isFinite(f.k)) return null;
+  const since = ledgerW(buckets, c.weights, at, now + 1);
+  const day = ledgerW(buckets, c.weights, now - 24 * HOUR, now + 1);
+  return {
+    k: f.k, rms: f.rms, pairs: f.pairs, unmetered: f.unmetered, scanned_at: ledgerState.scanned_at,
+    nowcast_weekly: Math.max(r.weekly, r.weekly + f.k * since),
+    ledger_rate: (f.k * day) / 24,
+  };
 }
 
 const statePath = () => path.join(orchDir(), "cc-pace-state.json");
@@ -481,7 +534,14 @@ export function main(argv) {
       writeFileAtomic(statePath(), JSON.stringify({ state: r.state, at: r.at, updated: new Date(now).toISOString() }) + "\n");
     } catch { /* hysteresis memory only: never fail the status line over it */ }
   }
-  console.log(json ? JSON.stringify(r) : statusLine(r));
+  if (!json) {
+    console.log(statusLine(r));
+    return 0;
+  }
+  // Shadow (A2): the ledger nowcast and the text line ride along in --json only. Read-only: status never scans.
+  let ledger = null;
+  try { ledger = ledgerShadow(r, loadLedgerState(), snaps, cfg, now); } catch { ledger = null; }
+  console.log(JSON.stringify({ ...r, ledger, line: statusLine(r) }));
   return 0;
 }
 

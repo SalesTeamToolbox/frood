@@ -273,3 +273,172 @@ test("CLI: unknown command or flag exits 2 with usage on stderr", () => {
     assert.equal(r.stdout, "");
   }
 });
+
+// ---------------------------------------------------------------- ledger shadow (cc-pacing-v2 A2)
+import { ledgerShadow, withDefaults, main as paceMain } from "../bin/cc-pace.mjs";
+import { DEFAULT_WEIGHTS } from "../bin/cc-ledger.mjs";
+
+const MIN = 60 * 1000;
+/** 10-minute opus buckets of {in: 1000} (w = 1000 each at opus weight 1) with start in [from, to). */
+function ledgerBuckets(from, to) {
+  const b = {};
+  for (let t = from; t < to; t += 10 * MIN) b[new Date(t).toISOString().slice(0, 15) + "0Z"] = { opus: { in: 1000, out: 0, cc: 0, cr: 0, w: 1000 } };
+  return b;
+}
+/** Snapshots 0.6 points per hour (k = 0.6 / 6000 = 1e-4 against ledgerBuckets); newest 1 h before `now`. */
+function ledgerSnaps(now = NOW) {
+  return [[12, 30], [9, 31.8], [6, 33.6], [3, 35.4], [1, 36.6]].map(([ageH, weekly]) => snap({ now, ageH, weekly, H: 20.5, resets: iso(now + 20.5 * HOUR) }));
+}
+const ledgerOf = (now = NOW, { scannedAgoMin = 1, to = now } = {}) => ({ v: 1, scanned_at: iso(now - scannedAgoMin * MIN), files: {}, ids: {}, buckets: ledgerBuckets(now - 24 * HOUR, to) });
+const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} vs ${b}`);
+
+test("ledger: DEFAULTS.ledger is frozen shadow with cc-ledger weights; withDefaults keeps mode shadow and overlays fresh_minutes", () => {
+  assert.ok(Object.isFrozen(DEFAULTS.ledger));
+  assert.deepEqual(DEFAULTS.ledger, { weights: DEFAULT_WEIGHTS, fresh_minutes: 30, mode: "shadow" });
+  const c = withDefaults({ ledger: { mode: "on", fresh_minutes: 45, weights: { opus: 3, haiku: "junk" } } });
+  assert.equal(c.ledger.mode, "shadow");
+  assert.equal(c.ledger.fresh_minutes, 45);
+  assert.equal(c.ledger.weights.opus, 3);
+  assert.equal(c.ledger.weights.haiku, DEFAULT_WEIGHTS.haiku);
+  assert.equal(withDefaults({ ledger: { fresh_minutes: "x" } }).ledger.fresh_minutes, 30);
+  const once = withDefaults({ ledger: { fresh_minutes: 45 } });
+  assert.deepEqual(withDefaults(once).ledger, once.ledger, "idempotent on an already-defaulted config");
+});
+
+test("ledger: null without a ledger, with k null, with scanned_at older than fresh_minutes, or without a usable weekly/at", () => {
+  const snaps = ledgerSnaps();
+  const r = pace(snaps);
+  assert.equal(ledgerShadow(r, null, snaps, DEFAULTS, NOW), null);
+  assert.equal(ledgerShadow(r, { v: 1, scanned_at: null, files: {}, ids: {}, buckets: {} }, snaps, DEFAULTS, NOW), null);
+  assert.equal(ledgerShadow(r, ledgerOf(), snaps.slice(-2), DEFAULTS, NOW), null, "one pair: k null");
+  assert.equal(ledgerShadow(r, ledgerOf(NOW, { scannedAgoMin: 31 }), snaps, DEFAULTS, NOW), null, "31 min old");
+  assert.notEqual(ledgerShadow(r, ledgerOf(NOW, { scannedAgoMin: 31 }), snaps, { ledger: { fresh_minutes: 60 } }, NOW), null, "fresh_minutes overlays");
+  assert.equal(ledgerShadow({ ...r, weekly: null }, ledgerOf(), snaps, DEFAULTS, NOW), null);
+  assert.equal(ledgerShadow({ ...r, at: "nope" }, ledgerOf(), snaps, DEFAULTS, NOW), null);
+  assert.equal(ledgerShadow(pace([], null), ledgerOf(), snaps, DEFAULTS, NOW), null, "unknown state");
+});
+
+test("ledger: nowcast_weekly = weekly + k·w(since at); ledger_rate = k·w(24 h)/24", () => {
+  const snaps = ledgerSnaps();
+  const r = pace(snaps);
+  assert.equal(r.weekly, 36.6);
+  const l = ledgerShadow(r, ledgerOf(), snaps, DEFAULTS, NOW);
+  assert.deepEqual(Object.keys(l).sort(), ["k", "ledger_rate", "nowcast_weekly", "pairs", "rms", "scanned_at", "unmetered"]);
+  near(l.k, 1e-4, 1e-12);
+  assert.equal(l.pairs, 4);
+  near(l.rms, 0, 1e-9);
+  assert.equal(l.scanned_at, iso(NOW - MIN));
+  near(l.nowcast_weekly, 36.6 + l.k * 6000); // six buckets since r.at (NOW - 1 h)
+  assert.ok(l.nowcast_weekly > r.weekly);
+  near(l.ledger_rate, (l.k * 144000) / 24); // 144 buckets in the last 24 h
+  near(l.ledger_rate, 0.6, 1e-9);
+});
+
+test("ledger: nowcast never below weekly (w = 0 since the snapshot -> exactly weekly)", () => {
+  const snaps = ledgerSnaps();
+  const r = pace(snaps);
+  const l = ledgerShadow(r, ledgerOf(NOW, { to: NOW - HOUR }), snaps, DEFAULTS, NOW);
+  assert.notEqual(l, null);
+  assert.equal(l.nowcast_weekly, r.weekly);
+  near(l.ledger_rate, (l.k * 138000) / 24);
+});
+
+// In-process status runs at a fixed clock, so outputs with and without a ledger compare byte for byte.
+function runStatus(home, args, now) {
+  const saved = { home: process.env.ORCH_HOME, nopace: process.env.ORCH_NO_PACE, now: Date.now, log: console.log };
+  const out = [];
+  process.env.ORCH_HOME = home;
+  delete process.env.ORCH_NO_PACE;
+  Date.now = () => now;
+  console.log = (s) => out.push(String(s) + "\n");
+  try {
+    const code = paceMain(args);
+    return { code, stdout: out.join("") };
+  } finally {
+    Date.now = saved.now;
+    console.log = saved.log;
+    if (saved.home === undefined) delete process.env.ORCH_HOME; else process.env.ORCH_HOME = saved.home;
+    if (saved.nopace !== undefined) process.env.ORCH_NO_PACE = saved.nopace;
+  }
+}
+const FIXTURES = {
+  "no snapshot": () => ({ snaps: [] }),
+  under: (now) => ({ snaps: [snap({ now })] }),
+  "ledger history": (now) => ({ snaps: ledgerSnaps(now) }),
+  on: (now) => ({ snaps: [snap({ now, weekly: 38.5, H: 84, five: 10 })] }),
+  over: (now) => ({ snaps: [snap({ now, five: 90 })] }),
+  stale: (now) => ({ snaps: [snap({ now, ageH: 3.2 })] }),
+  off: (now) => ({ snaps: [snap({ now })], limits: { cc: { enabled: false } } }),
+};
+function fixtureHome(name, now, withLedger) {
+  const s = sandbox();
+  const { snaps, limits } = FIXTURES[name](now);
+  if (snaps.length) {
+    fs.writeFileSync(path.join(s.dir, "cc-usage.jsonl"), snaps.map((x) => JSON.stringify(x)).join("\n") + "\n");
+    s.put(snaps[snaps.length - 1]);
+  }
+  if (limits) fs.writeFileSync(path.join(s.dir, "usage-limits.json"), JSON.stringify(limits));
+  const ledgerFile = path.join(s.dir, "cc-ledger.json");
+  if (withLedger) fs.writeFileSync(ledgerFile, JSON.stringify(ledgerOf(now)));
+  return { ...s, ledgerFile };
+}
+const stateBytes = (s) => (fs.existsSync(s.statePath) ? fs.readFileSync(s.statePath, "utf8") : null);
+
+test("status: text byte-identical, pre-existing --json keys and state file identical with and without a ledger; line = text", () => {
+  const now = NOW;
+  for (const name of Object.keys(FIXTURES)) {
+    const a = fixtureHome(name, now, false);
+    const b = fixtureHome(name, now, true);
+    const ta = runStatus(a.home, ["status"], now);
+    const tb = runStatus(b.home, ["status"], now);
+    assert.equal(ta.code, 0, name);
+    assert.equal(tb.stdout, ta.stdout, `${name}: text`);
+    assert.equal(stateBytes(b), stateBytes(a), `${name}: state file`);
+    const ja = JSON.parse(runStatus(a.home, ["status", "--json"], now).stdout);
+    const jb = JSON.parse(runStatus(b.home, ["status", "--json"], now).stdout);
+    assert.equal(ja.line + "\n", ta.stdout, `${name}: line equals the text output`);
+    assert.equal(jb.line, ja.line);
+    assert.equal(ja.ledger, null, `${name}: no ledger file`);
+    const strip = ({ ledger, line, ...rest }) => rest;
+    assert.deepEqual(strip(jb), strip(ja), `${name}: pre-existing keys`);
+    assert.deepEqual(strip(jb), JSON.parse(JSON.stringify(paceState(FIXTURES[name](now).snaps, withDefaults(FIXTURES[name](now).limits?.cc), now, JSON.parse(stateBytes(a))))), `${name}: the state`);
+    assert.equal(stateBytes(b), stateBytes(a), `${name}: state file after --json`);
+    if (name === "ledger history") {
+      assert.notEqual(jb.ledger, null);
+      near(jb.ledger.nowcast_weekly, jb.weekly + jb.ledger.k * 6000);
+    }
+  }
+});
+
+test("status: a stale or k-null ledger gives ledger null; status never writes cc-ledger.json", () => {
+  const now = NOW;
+  const none = fixtureHome("ledger history", now, false);
+  runStatus(none.home, ["status", "--json"], now);
+  runStatus(none.home, ["status"], now);
+  assert.equal(fs.existsSync(none.ledgerFile), false, "status never scans or creates the ledger");
+  const stale = fixtureHome("ledger history", now, false);
+  fs.writeFileSync(stale.ledgerFile, JSON.stringify(ledgerOf(now, { scannedAgoMin: 31 })));
+  const old = new Date(now - 2 * HOUR);
+  fs.utimesSync(stale.ledgerFile, old, old);
+  const before = fs.readFileSync(stale.ledgerFile, "utf8");
+  assert.equal(JSON.parse(runStatus(stale.home, ["status", "--json"], now).stdout).ledger, null);
+  assert.equal(fs.statSync(stale.ledgerFile).mtimeMs, old.getTime(), "ledger mtime unchanged");
+  assert.equal(fs.readFileSync(stale.ledgerFile, "utf8"), before);
+  const kNull = fixtureHome("under", now, true); // one snapshot: no pairs
+  assert.equal(JSON.parse(runStatus(kNull.home, ["status", "--json"], now).stdout).ledger, null);
+  const corrupt = fixtureHome("ledger history", now, false);
+  fs.writeFileSync(corrupt.ledgerFile, "{garbage");
+  const j = runStatus(corrupt.home, ["status", "--json"], now);
+  assert.equal(j.code, 0);
+  assert.equal(JSON.parse(j.stdout).ledger, null);
+});
+
+test("CLI: status --json (child process) carries line and ledger", () => {
+  const s = sandbox();
+  const now = Date.now();
+  s.put(snap({ now }));
+  const t = s.run(["status"]);
+  const o = JSON.parse(s.run(["status", "--json"]).stdout);
+  assert.equal(o.line + "\n", t.stdout);
+  assert.equal(o.ledger, null);
+});

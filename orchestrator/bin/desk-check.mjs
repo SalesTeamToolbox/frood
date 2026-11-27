@@ -18,6 +18,7 @@ import { statusRows, watchInfo } from "./desk.mjs";
 import { readService, syncAllStreamTitles } from "./session-title.mjs";
 import { importStatusline } from "./cc-usage.mjs";
 import { adviseTick } from "./cc-pace.mjs";
+import { scan as ledgerScan } from "./cc-ledger.mjs";
 import { measure, level, readState, writeState, shouldRunNotify, notifyNow, notifyParts } from "./session-pressure.mjs";
 
 function notify(text) {
@@ -27,6 +28,22 @@ function notify(text) {
     execFileSync("notify-send", ["-u", "critical", "orchestrator desk", text], { stdio: "ignore", windowsHide: true });
   } catch {
     // paging is best effort: a missing notifier must not fail the check
+  }
+}
+
+export const LEDGER_BUDGET_MS = 5000;
+
+/**
+ * One incremental cc-ledger scan (cc-pacing-v2 A2), in process, capped at 5 s: keeps the ledger fresh for the
+ * `cc-pace status --json` shadow nowcast. Silent and best effort: returns the scan result, or null on any error.
+ * deps.scan replaces the cc-ledger scan (tests).
+ */
+export function ledgerTick(deps = {}) {
+  try {
+    const run = deps.scan ?? ledgerScan;
+    return run({ budgetMs: LEDGER_BUDGET_MS });
+  } catch {
+    return null;
   }
 }
 
@@ -67,6 +84,8 @@ export async function main(argv) {
     } catch {}
     // Claude reset advice (cc-pace advise): silent, once-a-day desktop notice per advice; never pages, prints or fails.
     try { adviseTick(); } catch {}
+    // Claude transcript ledger: one capped incremental scan per tick; silent, never changes output or exit code.
+    try { ledgerTick(); } catch {}
     const r = check();
     let code = r.code;
     if (r.code === 1) {

@@ -196,8 +196,8 @@ test("paceChain: cc-worker first only for role worker on under; same contents ot
   assert.deepEqual(paceChain("worker-strong", ["worker-strong", "worker-nvidia", "worker-free"], { state: "under" }), ["worker-strong", "worker-nvidia", "worker-free"]);
   assert.deepEqual(paceChain("critic", ["critic"], { state: "under" }), ["critic"]);
   assert.deepEqual(paceChain("worker", TODAY, null), TODAY);
-  assert.deepEqual(ccPaceRecord({ state: "under", weekly: 10, projected: 29.7, at: "x", reason: "r" }, true), { state: "under", weekly: 10, projected: 29.7, at: "x", prepended: true });
-  assert.deepEqual(ccPaceRecord(null), { state: "unknown", weekly: null, projected: null, at: null, prepended: false });
+  assert.deepEqual(ccPaceRecord({ state: "under", weekly: 10, projected: 29.7, at: "x", reason: "r" }, true), { state: "under", weekly: 10, projected: 29.7, at: "x", prepended: true, shadow: null });
+  assert.deepEqual(ccPaceRecord(null), { state: "unknown", weekly: null, projected: null, at: null, prepended: false, shadow: null });
 });
 
 // ---- oc-worker --role expansion (dry: args() with the pace injected) ----
@@ -242,7 +242,7 @@ test("oc-worker: under + --session → today's chain (no read); under + worker-s
 
 test("paceDecision: the detached child's decision round-trips; junk → null", () => {
   const d = paceDecision(JSON.stringify({ cc_pace: { state: "under", weekly: 10, projected: 30, at: "t", prepended: true }, chain: ["cc-worker", "worker"] }));
-  assert.deepEqual(d, { cc_pace: { state: "under", weekly: 10, projected: 30, at: "t", prepended: true }, chain: ["cc-worker", "worker"] });
+  assert.deepEqual(d, { cc_pace: { state: "under", weekly: 10, projected: 30, at: "t", prepended: true, shadow: null }, chain: ["cc-worker", "worker"] });
   assert.equal(paceDecision("nope"), null);
   assert.equal(paceDecision(""), null);
   const h = tmp();
@@ -271,7 +271,7 @@ function ocw(h, argvExtra, extraEnv = {}, name = "w") {
   const fileReceipt = fs.existsSync(out + ".receipt.json") ? JSON.parse(fs.readFileSync(out + ".receipt.json", "utf8")) : null;
   return { ...r, receipt: line ? JSON.parse(line) : null, fileReceipt, out };
 }
-const FIVE = ["at", "prepended", "projected", "state", "weekly"];
+const FIVE = ["at", "prepended", "projected", "shadow", "state", "weekly"];
 
 test("oc-worker under --role worker: cc-worker runs first (detached), one pace read, receipt cc_pace prepended", () => {
   const h = paceHome("under");
@@ -318,7 +318,7 @@ test("oc-worker: a broken pace read records unknown and the run still succeeds",
   const h = paceHome("under");
   const r = ocw(h, ["--agent", "worker"], { ORCH_PACE_BIN: path.join(h, "missing", "cc-pace.mjs") });
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(r.receipt.cc_pace, { state: "unknown", weekly: null, projected: null, at: null, prepended: false });
+  assert.deepEqual(r.receipt.cc_pace, { state: "unknown", weekly: null, projected: null, at: null, prepended: false, shadow: null });
   assert.deepEqual(r.fileReceipt.cc_pace, r.receipt.cc_pace);
   const role = ocw(h, ["--role", "worker"], { ORCH_PACE_BIN: path.join(h, "missing", "cc-pace.mjs") }, "r");
   assert.equal(role.status, 0, role.stderr);
@@ -468,4 +468,16 @@ test("check-routing: --agent cc-worker (with or without --fallback) is not flagg
   const home = tmp();
   const live = withEnv({ ORCH_HOME: home }, () => checkRouting({ root: repo, extra: [], models: null }));
   assert.deepEqual(live.problems, []);
+});
+
+test("ccPaceRecord.shadow: numbers from a pace with ledger, null without; a record's shadow round-trips (detached child)", () => {
+  const pace = { state: "on", weekly: 40, projected: 70, at: "t", ledger: { k: 1e-4, rms: 0, pairs: 4, unmetered: 0, scanned_at: "s", nowcast_weekly: 41.5, ledger_rate: 0.6 } };
+  const rec = ccPaceRecord(pace, false);
+  assert.deepEqual(rec, { state: "on", weekly: 40, projected: 70, at: "t", prepended: false, shadow: { nowcast_weekly: 41.5, ledger_rate: 0.6 } });
+  assert.equal(ccPaceRecord({ ...pace, ledger: null }).shadow, null);
+  assert.equal(ccPaceRecord({ state: "on" }).shadow, null);
+  assert.deepEqual(ccPaceRecord({ ...pace, ledger: { nowcast_weekly: "x", ledger_rate: NaN } }).shadow, { nowcast_weekly: null, ledger_rate: null });
+  assert.deepEqual(ccPaceRecord(rec, false), rec, "re-recording a record keeps its shadow");
+  assert.deepEqual(paceDecision(JSON.stringify({ cc_pace: rec, chain: null })).cc_pace, rec);
+  assert.deepEqual(paceChain("worker", TODAY, pace), TODAY, "the shadow never routes");
 });
