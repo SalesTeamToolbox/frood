@@ -313,6 +313,29 @@ export function usage() {
 function isNvidiaAgent(agent) {
   return typeof agent === "string" && /-nvidia$/.test(agent);
 }
+
+// Pure: the time the host spent asleep between two watchdog ticks, i.e. the tick gap
+// minus the one tick (tickMs) that would have elapsed anyway. 0 when there was no sleep
+// (gap <= tickMs) so a normal 5 s tick never extends the deadline. Testable without a
+// real suspend.
+export function sleepGapMs(lastTick, now, tickMs) {
+  const slept = now - lastTick - tickMs;
+  return slept > 0 ? slept : 0;
+}
+// Pure: how much of an observed `gapMs` of host-sleep time can be given back to the
+// deadline, honoring the cap. Returns { add, total }: `add` is the ms to extend now (0
+// when the cap is exhausted) and `total` is the new cumulative slept time. Testable
+// without a real suspend, so the capped extension is covered at unit level.
+export function sleepExtensionMs(totalSleptMs, gapMs, capMs) {
+  const add = Math.max(0, Math.min(Math.max(gapMs, 0), capMs - totalSleptMs));
+  return { add, total: totalSleptMs + add };
+}
+// The watchdog ticks every 5 s; sleepGapMs subtracts exactly one tick so a normal tick
+// never counts as sleep.
+const WATCHDOG_MS = 5000;
+// The most a run's deadline may be pushed back for host sleep, so a machine that sleeps
+// all night still ends the run.
+const MAX_SLEEP_EXTENSION_MS = 2 * 60 * 60_000;
 // opts.pace: the pace object (or a function returning it, called at most once) used by `--role` expansion;
 // opts.chain: an already-decided chain (the detached child). Neither given: today's chain, no pace read.
 export function args(argv, opts = {}) {
@@ -991,6 +1014,13 @@ export function isQuotaError(receipt) {
 
 /** Classify-and-decide for the resume gate above: only transient pool-side failures. */
 export function resumableReason(errors) {
+  const text = errors.join("\n");
+  // Output-token truncation (e.g. "Response still truncated after two output token limit
+  // continuations") is a model output constraint, not a pool failure: its own resume reason
+  // so the resume message can tell the worker to split its edits into smaller pieces. Shapes
+  // are narrowed to the Mandate's truncation forms so a bare "truncated" error still takes its
+  // quota/rate-limit classification via `classify`.
+  if (/output.?token.?limit|output.?exceeded|truncat.{0,40}continuation/i.test(text)) return "truncated";
   const r = classify(errors)?.reason;
   return r === "dropped" || r === "quota" || r === "rate-limit" || r === "provider-error" ? r : null;
 }
@@ -1529,6 +1559,7 @@ export async function runWorker(a) {
   const graceMin = Number.isFinite(a.graceMin) ? a.graceMin : 15;
   let extendedMin;
   let graceUsed = false; // run scope: one extension per run, not per resume attempt
+  let totalSleptMs = 0; // host-sleep time given back to the deadline, capped at 2 h
   // HEAD at run start, for every agent (not only read-only roles): used to detect landed work when a run
   // times out or stalls — a commit after the start HEAD means work landed even though the run was killed.
   let wtHeadBefore = null;
@@ -1585,7 +1616,13 @@ export async function runWorker(a) {
     contractFile = out + ".contract.md";
     atomicWrite(contractFile, contract);
   }
-  const base = promptText + reportLine + FOOTER + readonlyFooter + visionFooter + fenceFooter;
+  // Small-edit rule up front for writer (non-read-only) agents only: one model response is capped at about
+  // 8k output tokens, so edits must be small pieces. Critic, senior and scout prompts do not get it.
+  let smallEditFooter = "";
+  if (!isReadOnly) {
+    smallEditFooter = "\n- Make file changes in small pieces with the edit tool, one function or section at a time, and never write more than about 150 lines in one tool call, because one model response is capped at about 8k output tokens.";
+  }
+  const base = promptText + reportLine + FOOTER + readonlyFooter + visionFooter + fenceFooter + smallEditFooter;
   const cliFor = (session, message) => {
     if (isCc) {
       // The prompt comes right after -p: --tools and --allowedTools are variadic and would swallow a later positional.
@@ -1669,6 +1706,7 @@ export async function runWorker(a) {
       // Grace: an active run at the deadline gets one extension instead of a kill.
       const GRACE_WINDOW_MS = 5 * 60000; // output within the last 5 minutes counts as active
       const arm = () => {
+        clearTimeout(timer); // never leave a stale deadline timer pending when re-arming
         timer = setTimeout(() => {
           const active = lastRealOutput != null && Date.now() - lastRealOutput <= GRACE_WINDOW_MS;
           if (!graceUsed && graceMin > 0 && active) {
@@ -1686,8 +1724,23 @@ export async function runWorker(a) {
       let timer;
       arm();
       const watchdog = setInterval(() => {
-        if (Date.now() - lastTick > 30_000) lastOut = Date.now(); // the host slept: never call that a stall
-        lastTick = Date.now();
+        const now = Date.now();
+        if (now - lastTick > 30_000) {
+          // The host slept: never call that a stall, and give the stolen time back to the
+          // deadline (capped at 2 h total). Re-arm so oc-worker active shows the new limit.
+          const slept = sleepGapMs(lastTick, now, WATCHDOG_MS);
+          if (slept > 0) {
+            const { add, total } = sleepExtensionMs(totalSleptMs, slept, MAX_SLEEP_EXTENSION_MS);
+            if (add > 0) {
+              totalSleptMs = total;
+              effectiveDeadline += add;
+              run.touch({ timeoutMin: Math.round((effectiveDeadline - started) / 60000) });
+              arm(); // re-arm for the extended deadline
+            }
+          }
+          lastOut = now; // the host slept: never call that a stall
+        }
+        lastTick = now;
         maxSilence = Math.max(maxSilence, Date.now() - lastOut);
         if (idleMin > 0 && !killReason && Date.now() - lastOut > idleMin * 60000) {
           const hung = findHungTool();
@@ -1704,7 +1757,7 @@ export async function runWorker(a) {
             killTree(child);
           }
         }
-      }, 5000);
+      }, WATCHDOG_MS);
       child.on("error", (e) => {
         if (sig.current?.child === child) { clearTimeout(sig.current.hard); sig.current = null; }
         clearTimeout(timer);
@@ -1801,7 +1854,9 @@ export async function runWorker(a) {
       // Mandate. A dropped run also needs output. No session id => no resume (the run fails as stalled).
       const canResumeSilent = r.killReason === "stalled";
       if (sig.name || !interrupted || (!sum.all.trim() && !canResumeSilent) || !sum.session || resumed.length >= resumeMax || Date.now() + waitMs >= effectiveDeadline) break;
-      const why = r.killReason === "stalled" ? `no output for ${idleMin} min` : (classifyErrors.find((e) => classify([e])?.reason === resumeReason) || errors[0] || "dropped").slice(0, 80);
+      const why = r.killReason === "stalled" ? `no output for ${idleMin} min`
+        : resumeReason === "truncated" ? "output token limit"
+        : (classifyErrors.find((e) => classify([e])?.reason === resumeReason) || errors[0] || "dropped").slice(0, 80);
       resumed.push({ session: sum.session, reason: why, seconds: Math.round((Date.now() - t0) / 1000) });
       if (waitMs > 0) await new Promise((res) => { const t = setTimeout(res, waitMs); sig.wake = () => { clearTimeout(t); res(); }; });
       sig.wake = null;
@@ -1810,6 +1865,9 @@ export async function runWorker(a) {
         `Before continuing, check the worktree state below and verify any half-finished edit or command.\n\n` +
         `git status --short:\n${gitOut(dir, ["status", "--short"])}\n\ngit diff --stat:\n${gitOut(dir, ["diff", "--stat"])}` +
         (r.hungToolChild ? `\nA tool command ran over ${idleMin} min and was stopped: ${r.hungToolChild.cmd}` : "") +
+        (resumeReason === "truncated"
+          ? "\nYour last response was cut off at the output token limit; split the remaining edit into smaller pieces, one function or section at a time, and never write more than about 150 lines in one tool call."
+          : "") +
         FOOTER;
       cli = cliFor(sum.session, msg);
     }
@@ -1850,7 +1908,7 @@ export async function runWorker(a) {
     const all = alls.join("\n\n");
     if (killReason && all.trim()) {
       // Partial work survives a timeout or stall; the status line makes it impossible to mistake for a finished run.
-      const why = killReason === "killed" ? `killed by ${sig.name}` : killReason === "stalled" ? `stalled — no output for ${idleMin} min` : `timeout after ${a.timeoutMin + (extendedMin || 0)} min`;
+      const why = killReason === "killed" ? `killed by ${sig.name}` : killReason === "stalled" ? `stalled — no output for ${idleMin} min` : `timeout after ${Math.round((effectiveDeadline - started) / 60000)} min`;
       fs.writeFileSync(out, `RESULT: BLOCKED: ${why} — partial output below\n\n${all}\n`);
       sum.final = "";
     } else if (sum.final) fs.writeFileSync(out, sum.final.endsWith("\n") ? sum.final : sum.final + "\n");
@@ -1926,6 +1984,7 @@ export async function runWorker(a) {
       ...(orphansKilled.length ? { orphans_killed: orphansKilled } : {}),
       ...(landed ? { landed } : {}),
       ...(extendedMin !== undefined ? { extended_min: extendedMin } : {}),
+      slept_ms: totalSleptMs, // host-sleep time given back to the deadline (0 when none, capped at 2 h)
       // An orchestrator's own events do not include the subagents it spawned; price the whole tree.
       tree: sum.session && !isCc ? sessionTree(sum.session) : null,
       // Read-only guard fields
