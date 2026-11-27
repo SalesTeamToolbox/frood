@@ -1175,6 +1175,29 @@ test("round: three INVALID attempts in a row never reach rounds_exhausted", () =
   assert.equal(JSON.parse(bytes(ticketFile(c, "p2-invalid-cap"))).rounds.length, 0);
 });
 
+test("round: INVALID findings after three counted rounds are refused, not rounds_exhausted", () => {
+  const c = mk();
+  workingTicket(c, "p2-invalid-after-cap");
+  const sha = landBlastFile(c);
+  // Seed three counted rounds (approved findings each time), exhausting the cap.
+  for (let i = 1; i <= 3; i++) {
+    const r = round(c, "p2-invalid-after-cap", { reviewed: sha });
+    assert.equal(r.status, 0, `counted round ${i}: ${r.stderr}`);
+    assert.equal(r.ticket.rounds.length, i);
+    assert.equal(r.ticket.rounds[i - 1].counted, true);
+  }
+  const invalid = fixtureText(c, "findings-invalid.md", "VERDICT: APPROVED\nTESTS: not run\n");
+  const before = bytes(ticketFile(c, "p2-invalid-after-cap"));
+  const r = round(c, "p2-invalid-after-cap", { findings: invalid, reviewed: sha });
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /findings gate INVALID/, "INVALID refusal must win over the cap");
+  assert.ok(!/rounds_exhausted/.test(r.stderr), "a refused INVALID never reaches rounds_exhausted");
+  const after = JSON.parse(bytes(ticketFile(c, "p2-invalid-after-cap")));
+  assert.equal(after.stage, "working", "ticket stays working, not blocked by INVALID paperwork");
+  assert.equal(after.rounds.length, 3, "no fourth round recorded");
+  assert.ok(Buffer.compare(before, bytes(ticketFile(c, "p2-invalid-after-cap"))) === 0, "nothing written");
+});
+
 test("phase 2 case 12: a worker question blocks the ticket without recording a round", () => {
   const c = mk();
   workingTicket(c, "p2-question");
