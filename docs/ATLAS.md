@@ -180,6 +180,20 @@ decides: LLM proxy configuration (endpoint, default model, available models)
 sibling traps: /llm/models, /llm/chat/completions
 topic: docs/atlas/routes.md
 
+## Claude Code gateway (/gw passthrough to OpenCode Go)
+
+### /gw/v1/messages
+handler: dashboard.gateway.build_gateway_router
+decides: routed to Go upstream (route table dashboard.gateway.build_route_table) or refused (auth dashboard.gateway.check_gateway_auth, claude-id block, loopback gates)
+sibling traps: /gw/v1/models, /llm/v1/messages, /v1/messages, /llm/v1/models
+topic: docs/atlas/routes.md
+
+### /gw/v1/models
+handler: dashboard.gateway.build_gateway_router
+decides: routed Go model list (same route table and auth as /gw/v1/messages)
+sibling traps: /gw/v1/messages, /llm/v1/models, /llm/models
+topic: docs/atlas/routes.md
+
 ## Providers
 
 ### /api/providers

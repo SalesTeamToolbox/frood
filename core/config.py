@@ -348,6 +348,16 @@ class Settings:
     cc_pace_node: str = "node"  # Node binary used to run cc-pace.mjs
     cc_pace_orch_home: str = ""  # ORCH_HOME passed to cc-pace.mjs when set
 
+    # Claude Code gateway (T1 passthrough to OpenCode Go models at /gw)
+    frood_gateway_token: str = (
+        ""  # NEVER auto-generated: empty means the gateway refuses all requests
+    )
+    gateway_go_base_url: str = "https://opencode.ai/zen/go/v1"
+    gateway_go_models: str = (
+        "deepseek-v4.1-flash,glm-5.3-flash,kimi-k3,minimax-m3,qwen3.8-flash,kimi-k2.7-code,glm-5.3"
+    )
+    gateway_upstream_timeout_s: float = 600
+
     @classmethod
     def from_env(cls) -> "Settings":
         # Enforce secure JWT secret
@@ -679,6 +689,15 @@ class Settings:
             cc_pace_enabled=os.getenv("CC_PACE_ENABLED", "true").lower() in ("true", "1", "yes"),
             cc_pace_node=os.getenv("CC_PACE_NODE", "node"),
             cc_pace_orch_home=os.getenv("CC_PACE_ORCH_HOME", ""),
+            # Claude Code gateway (fail closed: empty token refuses every request)
+            frood_gateway_token=os.getenv("FROOD_GATEWAY_TOKEN", ""),
+            gateway_go_base_url=os.getenv("GATEWAY_GO_BASE_URL", "https://opencode.ai/zen/go/v1"),
+            gateway_go_models=os.getenv(
+                "GATEWAY_GO_MODELS",
+                "deepseek-v4.1-flash,glm-5.3-flash,kimi-k3,minimax-m3,"
+                "qwen3.8-flash,kimi-k2.7-code,glm-5.3",
+            ),
+            gateway_upstream_timeout_s=float(os.getenv("GATEWAY_UPSTREAM_TIMEOUT_S", "600")),
         )
 
     def is_paid_allowed(self, provider: str) -> bool:
