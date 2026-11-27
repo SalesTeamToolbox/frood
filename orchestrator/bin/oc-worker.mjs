@@ -1531,9 +1531,54 @@ export async function runWorker(a) {
   // Both slots held: the clock starts now (the time budget does not count slot wait time). The registry
   // heartbeat moves the run out of `queued`, and `started` resets so elapsed/OVERDUE measure the run only.
   run.touch({ state: "running", started: Date.now() });
+  // Sleep inhibitor: while a run is active (slots held → attempt loop's end, resumes included) hold a
+  // systemd inhibitor that blocks idle sleep and lid-switch sleep only, so the laptop cannot idle out of
+  // an active run. `sleep`/`shutdown` are not in --what, so a UPower battery-critical suspend still
+  // happens. Skipped silently on Windows/macOS, without systemd-inhibit on PATH, or with
+  // ORCH_NO_INHIBIT=1; a failed spawn warns on stderr and never fails the run. The inhibitor ends by
+  // itself after timeout + grace + 5 minutes even if oc-worker dies.
+  let inhibitorPid = null;
+  let inhibitorChild = null;
+  const releaseInhibitor = () => {
+    if (inhibitorChild) {
+      try { inhibitorChild.kill("SIGTERM"); } catch {}
+      inhibitorChild = null;
+    }
+    inhibitorPid = null;
+  };
+  const startInhibitor = () => {
+    if (process.platform === "win32" || process.platform === "darwin") return;
+    if (process.env.ORCH_NO_INHIBIT === "1") return;
+    const bin = process.env.ORCH_INHIBIT_BIN || "systemd-inhibit";
+    const timeoutMin = Number.isFinite(a.timeoutMin) ? a.timeoutMin : 30;
+    const graceMin = Number.isFinite(a.graceMin) ? a.graceMin : 15;
+    const seconds = (timeoutMin + graceMin + 5) * 60;
+    let child;
+    try {
+      child = spawn(bin, [
+        "--what=idle:handle-lid-switch",
+        "--mode=block",
+        "--who=oc-worker",
+        `--why=worker run ${title}`,
+        "sleep",
+        String(seconds),
+      ], { detached: true, stdio: "ignore", windowsHide: true });
+    } catch (e) {
+      console.error(`oc-worker: sleep inhibitor spawn failed (${bin}): ${e.message}`);
+      return;
+    }
+    child.on("error", (e) => {
+      console.error(`oc-worker: sleep inhibitor spawn failed (${bin}): ${e.message}`);
+    });
+    child.unref();
+    inhibitorPid = child.pid;
+    inhibitorChild = child;
+  };
+  startInhibitor();
   const release = () => {
     releaseMachine();
     providerSlot?.release();
+    releaseInhibitor();
   };
   // Signals: from here on this run holds slots, so SIGTERM/SIGINT/SIGHUP must end its agent tree and release them.
   // `sig.current` is the live attempt (child + the sweep watcher). The handler only kills and flags; the normal flow
@@ -1545,6 +1590,7 @@ export async function runWorker(a) {
     sig.name = name;
     sig.code = SIGNALS[name];
     sig.wake?.();
+    releaseInhibitor(); // the run is ending: release the sleep inhibitor now
     const cur = sig.current;
     if (!cur) return;
     if (process.platform === "win32") return killTree(cur.child);

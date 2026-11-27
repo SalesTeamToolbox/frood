@@ -443,6 +443,27 @@ test("workstation --dry-run never writes files or calls systemctl", () => {
   assert.ok(!fs.existsSync(callsLog) || fs.readFileSync(callsLog, "utf8").trim() === "", "fake systemctl must never be called in dry run");
 });
 
+test("no worker prompt carries the mail-server or worktree-finish blocks; installed renders keep frontmatter", () => {
+  const agentsDir = path.join(REPO, "agents");
+  for (const name of ["worker.md", "worker-free.md", "worker-nvidia.md", "worker-strong.md"]) {
+    const src = fs.readFileSync(path.join(agentsDir, name), "utf8");
+    assert.ok(!src.includes("MAIL_SERVER"), `${name}: mail-server block must be gone`);
+    assert.ok(!src.includes("wt-finish"), `${name}: worktree-finish block must be gone`);
+    assert.ok(!src.includes("Quick Reference — Mail Server Connection"), `${name}: mail heading gone`);
+    assert.ok(!src.includes("Quick Reference — Worktree Cleanup"), `${name}: cleanup heading gone`);
+    if (name === "worker-nvidia.md") {
+      assert.match(src, /Nemotron 3\.5 Super VL 120B/, `${name}: description must name the real model`);
+      assert.match(src, /model: nvidia\/nvidia\/nemotron-3\.5-super-vl-120b-a12b/, `${name}: model line unchanged`);
+    }
+    for (const harness of ["cc", "oc"]) {
+      const rendered = render(path.join(agentsDir, name), harness);
+      assert.ok(rendered.startsWith("---\n"), `${name} (${harness}): render keeps frontmatter on line 1`);
+      assert.ok(rendered.slice(4).includes("\n---\n"), `${name} (${harness}): render closes frontmatter`);
+      assert.ok(!rendered.includes("MAIL_SERVER") && !rendered.includes("wt-finish"), `${name} (${harness}): rendered prompt clean`);
+    }
+  }
+});
+
 // tmp2 is a separate temp allocator so workstation tests don't collide with freshHome users.
 function tmp2() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "ws-install-"));
