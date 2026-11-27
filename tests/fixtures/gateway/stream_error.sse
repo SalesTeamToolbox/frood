@@ -2,4 +2,6 @@ data: {"id":"cmpl_1","object":"chat.completion.chunk","created":1,"model":"m","c
 
 data: {"id":"cmpl_1","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":null}],"error":{"type":"api_error","message":"boom"}}
 
+data: {"id":"cmpl_1","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"content":"AFTER"}}]}
+
 data: [DONE]

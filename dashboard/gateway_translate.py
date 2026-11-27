@@ -57,12 +57,15 @@ def _openai_image_url_part(block: dict[str, Any]) -> dict[str, Any]:
 
 
 def _tool_result_call_ids(content: Any) -> set[str]:
-    """tool_call_id values from ``tool_result`` blocks in a user message content."""
+    """tool_use_id (or tool_call_id) values from ``tool_result`` blocks in a user message content.
+
+    Anthropic names the field ``tool_use_id``; OpenAI emits ``tool_call_id``. Accept both.
+    """
     ids: set[str] = set()
     if isinstance(content, list):
         for b in content:
             if isinstance(b, dict) and b.get("type") == "tool_result":
-                tid = b.get("tool_call_id")
+                tid = b.get("tool_use_id") or b.get("tool_call_id")
                 if tid:
                     ids.add(tid)
     return ids
@@ -214,7 +217,7 @@ def anthropic_to_openai(
                         openai_messages.append(
                             {
                                 "role": "tool",
-                                "tool_call_id": b.get("tool_call_id", ""),
+                                "tool_call_id": b.get("tool_use_id") or b.get("tool_call_id", ""),
                                 "content": tr_text,
                             }
                         )
@@ -278,17 +281,26 @@ def anthropic_to_openai(
     # --- tool_choice ---
     tool_choice = body.get("tool_choice")
     oai_tool_choice: Any = "auto"
-    if tool_choice == "auto":
+    if isinstance(tool_choice, dict):
+        ctype = tool_choice.get("type")
+        if ctype == "tool":
+            oai_tool_choice = {
+                "type": "function",
+                "function": {"name": tool_choice.get("name", "")},
+            }
+        elif ctype == "auto":
+            oai_tool_choice = "auto"
+        elif ctype == "any":
+            oai_tool_choice = "required"
+        elif ctype == "none":
+            oai_tool_choice = "none"
+        # any other dict type -> keep the default "auto"
+    elif tool_choice == "auto":
         oai_tool_choice = "auto"
     elif tool_choice == "any":
         oai_tool_choice = "required"
     elif tool_choice == "none":
         oai_tool_choice = "none"
-    elif isinstance(tool_choice, dict) and tool_choice.get("type") == "tool":
-        oai_tool_choice = {
-            "type": "function",
-            "function": {"name": tool_choice.get("name", "")},
-        }
 
     # --- parameters ---
     openai_body: dict[str, Any] = {}

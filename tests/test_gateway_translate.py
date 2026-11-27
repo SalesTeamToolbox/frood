@@ -109,10 +109,10 @@ def test_anthropic_to_openai_request_golden():
             {
                 "role": "user",
                 "content": [
-                    {"type": "tool_result", "tool_call_id": "toolu_1", "content": "It is sunny"},
+                    {"type": "tool_result", "tool_use_id": "toolu_1", "content": "It is sunny"},
                     {
                         "type": "tool_result",
-                        "tool_call_id": "toolu_2",
+                        "tool_use_id": "toolu_2",
                         "content": "error happened",
                         "is_error": True,
                     },
@@ -163,6 +163,24 @@ def test_disable_parallel_tool_use():
     openai_body, warnings = anthropic_to_openai(body, "m")
     assert openai_body["parallel_tool_calls"] is False
     assert openai_body["tool_choice"] == {"type": "function", "function": {"name": "fn"}}
+
+
+def test_tool_choice_dict_forms():
+    """#2: dict tool_choice forms auto/any/none/tool map correctly."""
+    cases = [
+        ({"type": "auto"}, "auto"),
+        ({"type": "any"}, "required"),
+        ({"type": "none"}, "none"),
+        ({"type": "tool", "name": "fn"}, {"type": "function", "function": {"name": "fn"}}),
+    ]
+    for tc, expected in cases:
+        body = {
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"name": "fn", "description": "d", "input_schema": {"type": "object"}}],
+            "tool_choice": tc,
+        }
+        openai_body, _ = anthropic_to_openai(body, "m")
+        assert openai_body["tool_choice"] == expected, tc
 
 
 def test_unknown_param_warning():
@@ -264,10 +282,10 @@ def test_tool_result_ordering():
             {
                 "role": "user",
                 "content": [
-                    {"type": "tool_result", "tool_call_id": "call_A", "content": "result A"},
+                    {"type": "tool_result", "tool_use_id": "call_A", "content": "result A"},
                     {
                         "type": "tool_result",
-                        "tool_call_id": "call_B",
+                        "tool_use_id": "call_B",
                         "content": "error B",
                         "is_error": True,
                     },
@@ -283,6 +301,40 @@ def test_tool_result_ordering():
         {"role": "tool", "tool_call_id": "call_B", "content": "ERROR: error B"},
         {"role": "user", "content": "thanks"},
     ]
+
+
+def test_tool_result_tool_use_id_and_tool_call_id():
+    """#1: tool_result accepts both tool_use_id (Anthropic) and tool_call_id (OpenAI) spellings."""
+    body = {
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "calling"},
+                    {"type": "tool_use", "id": "toolu_A", "name": "fn", "input": {}},
+                    {"type": "tool_use", "id": "toolu_B", "name": "fn", "input": {}},
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    # first result uses Anthropic's real field name
+                    {"type": "tool_result", "tool_use_id": "toolu_A", "content": "A ok"},
+                    # second uses the OpenAI-shaped output field name (accepted as input)
+                    {"type": "tool_result", "tool_call_id": "toolu_B", "content": "B ok"},
+                ],
+            },
+        ],
+    }
+    openai_body, warnings = anthropic_to_openai(body, "m")
+    msgs = openai_body["messages"]
+    # No orphan synthetic results: both tool_use ids matched a tool_result.
+    tool_msgs = [m for m in msgs if m["role"] == "tool"]
+    assert tool_msgs == [
+        {"role": "tool", "tool_call_id": "toolu_A", "content": "A ok"},
+        {"role": "tool", "tool_call_id": "toolu_B", "content": "B ok"},
+    ]
+    assert "orphan_tool_use" not in warnings
 
 
 # ---------------------------------------------------------------------------
@@ -309,13 +361,13 @@ def test_stream_midstream_error():
     """G6: mid-stream error -> open block closed, then error, nothing after.
 
     The error case is fed whole, in 7-byte chunks, and with a trailing data
-    line in the same feed (nothing may be emitted after the error event).
+    line in the same fixture/feed (nothing may be emitted after the error
+    event).
     """
     _stream_case("stream_error.sse", "stream_error.golden")
-    # Trailing data in the same feed after the error must produce nothing.
-    sse = _load("stream_error.sse").encode("utf-8")
+    # Trailing data in a separate feed after the error must produce nothing.
     tr = StreamTranslator("test-model")
-    tr.feed(sse)
+    tr.feed(_load("stream_error.sse").encode("utf-8"))
     assert tr.feed(b'data: {"choices":[{"delta":{"content":"AFTER"}}]}\n\n') == b""
 
 
