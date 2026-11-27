@@ -215,7 +215,7 @@ test("bar 8: ids and buckets older than 8 weeks pruned; saved JSON matches the s
   for (const bad of [s.home, "proj-a", "s1.jsonl", "assistant", "cwd", "sessionId"]) assert.ok(!text.includes(bad), bad);
 });
 
-test("bar 9: --budget-ms 0 -> partial with offsets saved; a later scan reaches the full totals", () => {
+test("bar 9 / bar 10 (minor a): budget 0 reads nothing -> partial; a later scan reaches the full totals", () => {
   const mk = () => {
     const s = sandbox();
     fs.mkdirSync(path.join(s.sess, "s2", "subagents"), { recursive: true });
@@ -232,14 +232,62 @@ test("bar 9: --budget-ms 0 -> partial with offsets saved; a later scan reaches t
   const s = mk();
   const r1 = s.run({ budgetMs: 0 });
   assert.equal(r1.partial, true);
-  assert.ok(r1.lines >= 1 && r1.lines < 11, String(r1.lines));
-  const st1 = s.state();
-  const offs = Object.values(st1.files).map((e) => e.offset);
-  assert.ok(offs.some((o) => o > 0), "an offset was saved");
+  assert.equal(r1.lines, 0);
+  assert.equal(r1.bytes_read, 0);
+  assert.equal(r1.files_read, 0);
+  assert.deepEqual(s.state().ids, {});
+  // A positive budget still makes progress (at least one line).
+  const r1b = s.run({ budgetMs: 1e-9 });
+  assert.ok(r1b.lines >= 1, String(r1b.lines));
   const r2 = s.run();
   assert.equal(r2.partial, false);
   assert.deepEqual(totals(s.state()), totals(full.state()));
   assert.deepEqual(s.state().ids, full.state().ids);
+  // Nothing left to read: budget 0 is not partial.
+  assert.equal(s.run({ budgetMs: 0 }).partial, false);
+});
+
+test("bar 11 (minor b): an unreadable file -> errors: 1, the others counted, state saved", { skip: process.getuid?.() === 0 ? "root ignores chmod 000" : false }, () => {
+  const s = sandbox();
+  fs.writeFileSync(s.file, line({ id: "a" }) + line({ id: "b" }));
+  const bad = path.join(s.sess, "locked.jsonl");
+  fs.writeFileSync(bad, line({ id: "x" }));
+  fs.chmodSync(bad, 0o000);
+  try {
+    const r = s.run();
+    assert.equal(r.errors, 1);
+    assert.equal(r.counted, 2);
+    assert.deepEqual(Object.keys(s.state().ids).sort(), ["a", "b"]);
+    assert.ok(fs.existsSync(s.stateFile), "state saved");
+    fs.chmodSync(bad, 0o644);
+    const r2 = s.run();
+    assert.equal(r2.errors, 0);
+    assert.deepEqual(Object.keys(s.state().ids).sort(), ["a", "b", "x"]);
+  } finally {
+    try { fs.chmodSync(bad, 0o644); } catch { /* removed */ }
+  }
+});
+
+test("bar 12 (minor c): rewrite to a longer file whose byte at offset-1 is not \\n -> rescanned from 0", () => {
+  const s = sandbox();
+  const at = ts();
+  fs.writeFileSync(s.file, line({ id: "a", at, out: 1 }) + line({ id: "b", at, out: 2 }));
+  const off = fs.statSync(s.file).size;
+  s.run();
+  // New content: same ids with new counts plus one more, longer, and not a newline at the old offset - 1.
+  const body = line({ id: "a", at, out: 100, inp: 12345 }) + line({ id: "b", at, out: 200 }) + line({ id: "c", at, out: 3 });
+  assert.ok(Buffer.byteLength(body) > off);
+  assert.notEqual(Buffer.from(body)[off - 1], 10);
+  fs.writeFileSync(s.file, body);
+  const later = new Date(Date.now() + 1000);
+  fs.utimesSync(s.file, later, later);
+  const r = s.run();
+  assert.equal(r.bytes_read, Buffer.byteLength(body));
+  const fresh = sandbox();
+  fs.writeFileSync(fresh.file, body);
+  fresh.run();
+  assert.deepEqual(totals(s.state()), totals(fresh.state()));
+  assert.deepEqual(s.state().ids, fresh.state().ids);
 });
 
 test("CLI: unknown command or flag -> exit 2 with usage on stderr", () => {
@@ -267,7 +315,7 @@ test("CLI: scan text line, then summary --hours 24 --json sums w per family", ()
   const j = s.cli(["scan", "--json", "--budget-ms", "5000"]);
   assert.equal(j.status, 0, j.stderr);
   assert.deepEqual(Object.keys(JSON.parse(j.stdout)).sort(),
-    ["bytes_read", "counted", "files", "files_read", "lines", "ms", "partial", "scanned_at", "skipped"]);
+    ["bytes_read", "counted", "errors", "files", "files_read", "lines", "ms", "partial", "scanned_at", "skipped"]);
   const sm = s.cli(["summary", "--hours", "24", "--json"]);
   assert.equal(sm.status, 0, sm.stderr);
   const out = JSON.parse(sm.stdout);

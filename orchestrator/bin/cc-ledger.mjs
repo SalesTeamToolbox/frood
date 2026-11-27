@@ -10,6 +10,8 @@
 //
 //   node cc-ledger.mjs scan [--budget-ms N] [--json]
 //   node cc-ledger.mjs summary [--hours N] [--json]
+//   node cc-ledger.mjs fit [--json]        k = weekly % per weighted token, from cc-usage.jsonl snapshots (A1b)
+//   node cc-ledger.mjs backtest [--json]   walk-forward check of k against the snapshots (A1b)
 // Exit: 0 ok, 2 usage. Never prints transcript content.
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -17,6 +19,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { orchDir, loadLimits } from "./usage.mjs";
+import { readHistory } from "./cc-usage.mjs";
 
 export const KEEP_MS = 8 * 7 * 24 * 3600 * 1000;
 export const DEFAULT_WEIGHTS = Object.freeze({ fable: 2, opus: 1, sonnet: 0.6, haiku: 0.2, other: 0.6 });
@@ -189,9 +192,10 @@ export function scan(opts = {}) {
   const state = opts.state ?? loadState(stateFile);
   const cutoff = now - KEEP_MS;
   const cutBucket = bucketOf(cutoff);
-  const res = { files: 0, files_read: 0, bytes_read: 0, lines: 0, counted: 0, skipped: 0, partial: false };
+  const res = { files: 0, files_read: 0, bytes_read: 0, lines: 0, counted: 0, skipped: 0, errors: 0, partial: false };
   let any = false;
-  const expired = () => any && Date.now() - t0 >= budgetMs;
+  // Budget 0 reads nothing; a positive budget always reads at least one line (progress guarantee).
+  const expired = () => budgetMs <= 0 || (any && Date.now() - t0 >= budgetMs);
 
   const listed = [];
   for (const p of listFiles(dir)) {
@@ -205,7 +209,7 @@ export function scan(opts = {}) {
   listed.sort((a, b) => b.mtime - a.mtime);
 
   const buf = Buffer.allocUnsafe(CHUNK);
-  outer: for (const f of listed) {
+  for (const f of listed) {
     let ent = state.files[f.key];
     if (!ent) {
       if (f.mtime < cutoff) continue;
@@ -214,13 +218,20 @@ export function scan(opts = {}) {
     if (f.size < ent.offset || f.mtime < ent.mtime) ent.offset = 0;
     if (f.size === ent.offset) { state.files[f.key] = { size: f.size, mtime: f.mtime, offset: ent.offset }; continue; }
     if (expired()) { res.partial = true; break; }
+    // One unreadable file (open/read error) must not abort the scan: its stored entry stays as it was.
     let fd;
-    try { fd = fs.openSync(f.p, "r"); } catch { continue; }
+    try { fd = fs.openSync(f.p, "r"); } catch { res.errors++; continue; }
     res.files_read++;
     let offset = ent.offset;
-    let pos = offset;
     let carry = null;
+    let stop = false;
     try {
+      // A rewrite to a size >= offset: the byte before the offset is no longer the newline we stopped after.
+      if (offset > 0) {
+        const one = Buffer.alloc(1);
+        if (fs.readSync(fd, one, 0, 1, offset - 1) !== 1 || one[0] !== 10) offset = 0;
+      }
+      let pos = offset;
       while (pos < f.size) {
         const n = fs.readSync(fd, buf, 0, Math.min(CHUNK, f.size - pos), pos);
         if (n <= 0) break;
@@ -229,11 +240,7 @@ export function scan(opts = {}) {
         let start = 0;
         let nl;
         while ((nl = data.indexOf(10, start)) !== -1) {
-          if (expired()) {
-            res.partial = true;
-            state.files[f.key] = { size: f.size, mtime: f.mtime, offset };
-            break outer;
-          }
+          if (expired()) { res.partial = true; stop = true; break; }
           const line = data.subarray(start, nl);
           res.lines++;
           any = true;
@@ -245,12 +252,17 @@ export function scan(opts = {}) {
           res.bytes_read += len;
           start = nl + 1;
         }
+        if (stop) break;
         carry = start < data.length ? Buffer.from(data.subarray(start)) : null;
       }
+    } catch {
+      res.errors++;
+      continue;
     } finally {
-      fs.closeSync(fd);
+      try { fs.closeSync(fd); } catch { /* already gone */ }
     }
     state.files[f.key] = { size: f.size, mtime: f.mtime, offset };
+    if (stop) break;
   }
 
   prune(state, now, weights);
@@ -275,7 +287,152 @@ export function summary(state, hours = 24, now = Date.now()) {
   return { hours, since, scanned_at: state?.scanned_at ?? null, families, total };
 }
 
-const USAGE = "usage: cc-ledger.mjs scan [--budget-ms N] [--json] | summary [--hours N] [--json]";
+// ---- fit / backtest (A1b) ----------------------------------------------------------------------------------
+export const FIT_DAYS = 14;
+const FIT_MIN_PAIRS = 3;
+const FIT_MIN_HOURS = 6;
+const PAIR_MIN_H = 0.5;
+const PAIR_MAX_H = 12;
+const BACKTEST_MIN_H = 2;
+
+/**
+ * Snapshots -> [{t, pct, resets}] sorted by time; records without a parseable at / weekly.pct / resets_at dropped.
+ * `resets` is weekly.resets_at rounded to the minute: snapshots carry sub-second jitter (15:59:59.8 vs 16:00:00.1),
+ * so windows are compared the way cc-pace compares them.
+ */
+function normSnaps(snapshots) {
+  const out = [];
+  for (const s of snapshots ?? []) {
+    const t = Date.parse(s?.at);
+    const pct = Number(s?.weekly?.pct);
+    const r = typeof s?.weekly?.resets_at === "string" ? Date.parse(s.weekly.resets_at) : NaN;
+    if (!Number.isFinite(t) || s?.weekly?.pct == null || !Number.isFinite(pct) || !Number.isFinite(r)) continue;
+    const resets = Math.round(r / 60e3);
+    out.push({ t, pct, resets });
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+
+/**
+ * Buckets -> a weight-sum function over [t1, t2). Each bucket's w is recomputed from its raw {in, out, cc, cr} with
+ * `weights` (the stored w is ignored), so a weights change re-weights all history uniformly.
+ */
+function bucketIndex(buckets, weights) {
+  const rows = [];
+  for (const [b, fams] of Object.entries(buckets ?? {})) {
+    const t = Date.parse(b);
+    if (!Number.isFinite(t) || !fams || typeof fams !== "object") continue;
+    const ws = {};
+    for (const [f, c] of Object.entries(fams)) ws[f] = weighted(c, f, weights);
+    rows.push({ t, ws });
+  }
+  rows.sort((a, b) => a.t - b.t);
+  const lower = (x) => { // first index with rows[i].t >= x
+    let lo = 0, hi = rows.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (rows[mid].t < x) lo = mid + 1; else hi = mid; }
+    return lo;
+  };
+  return (t1, t2) => {
+    const fam = {};
+    let w = 0;
+    for (let i = lower(t1); i < rows.length && rows[i].t < t2; i++) {
+      for (const [f, v] of Object.entries(rows[i].ws)) { fam[f] = (fam[f] ?? 0) + v; w += v; }
+    }
+    return { w, fam };
+  };
+}
+
+/** Valid pairs: consecutive snapshots, same window, 0.5 h <= dt <= 12 h, dpct >= 0. */
+function pairsOf(snaps, sumW) {
+  const out = [];
+  for (let i = 1; i < snaps.length; i++) {
+    const a = snaps[i - 1], b = snaps[i];
+    const h = (b.t - a.t) / 3600e3;
+    const dpct = b.pct - a.pct;
+    if (a.resets !== b.resets || h < PAIR_MIN_H || h > PAIR_MAX_H || dpct < 0) continue;
+    const { w, fam } = sumW(a.t, b.t);
+    out.push({ t1: a.t, t2: b.t, h, dpct, dw: w, fam });
+  }
+  return out;
+}
+
+/** Least squares through the origin over pairs ending in (now - 14 d, now]. */
+function fitPairs(all, now) {
+  const since = now - FIT_DAYS * 24 * 3600e3;
+  const pairs = all.filter((p) => p.t2 <= now && p.t2 > since);
+  let sxy = 0, sxx = 0, sh = 0;
+  const famW = {};
+  let totW = 0;
+  for (const p of pairs) {
+    sxy += p.dpct * p.dw; sxx += p.dw * p.dw; sh += p.h;
+    for (const [f, v] of Object.entries(p.fam)) { famW[f] = (famW[f] ?? 0) + v; totW += v; }
+  }
+  const mix = {};
+  if (totW > 0) for (const [f, v] of Object.entries(famW)) mix[f] = v / totW;
+  const valid = pairs.length >= FIT_MIN_PAIRS && sh >= FIT_MIN_HOURS && totW > 0 && sxx > 0;
+  if (!valid) return { k: null, rms: null, unmetered: null, pairs: pairs.length, hours: sh, mix };
+  const k = sxy / sxx;
+  let sr = 0, sr2 = 0;
+  for (const p of pairs) { const r = p.dpct - k * p.dw; sr += r; sr2 += r * r; }
+  return { k, rms: Math.sqrt(sr2 / pairs.length), unmetered: sr / sh, pairs: pairs.length, hours: sh, mix };
+}
+
+/**
+ * Fit k (weekly percent per weighted token) from usage snapshots and ledger buckets.
+ * opts: {now = Date.now(), weights = loadWeights()}. Returns {k|null, rms, unmetered (%/h, signed), pairs, hours, mix}.
+ */
+export function fit(snapshots, buckets, opts = {}) {
+  const now = opts.now ?? Date.now();
+  const sumW = bucketIndex(buckets, opts.weights ?? loadWeights());
+  return fitPairs(pairsOf(normSnaps(snapshots), sumW), now);
+}
+
+/**
+ * Walk-forward backtest: for each snapshot s_j, s_i = the latest earlier snapshot in the same window with
+ * s_j.at - s_i.at >= 2 h; k is fitted only on pairs ending at or before s_i.at. Predict s_i.pct + k·Δw(s_i→s_j).
+ * Returns {n, mae, max_err, under_predict (count of predictions below the actual)}; points without a valid k skip.
+ */
+export function backtest(snapshots, buckets, opts = {}) {
+  const now = opts.now ?? Date.now();
+  const snaps = normSnaps(snapshots).filter((s) => s.t <= now);
+  const sumW = bucketIndex(buckets, opts.weights ?? loadWeights());
+  const all = pairsOf(snaps, sumW);
+  let n = 0, sum = 0, max = 0, under = 0;
+  for (let j = 1; j < snaps.length; j++) {
+    const sj = snaps[j];
+    let si = null;
+    for (let i = j - 1; i >= 0; i--) {
+      if (snaps[i].resets !== sj.resets) break;
+      if (sj.t - snaps[i].t >= BACKTEST_MIN_H * 3600e3) { si = snaps[i]; break; }
+    }
+    if (!si) continue;
+    const { k } = fitPairs(all, si.t);
+    if (k == null) continue;
+    const pred = si.pct + k * sumW(si.t, sj.t).w;
+    const err = pred - sj.pct;
+    n++; sum += Math.abs(err); max = Math.max(max, Math.abs(err));
+    if (err < -1e-9) under++;
+  }
+  return { n, mae: n ? sum / n : null, max_err: n ? max : null, under_predict: under };
+}
+
+const USAGE = "usage: cc-ledger.mjs scan [--budget-ms N] [--json] | summary [--hours N] [--json] | fit [--json] | backtest [--json]";
+
+const fnum = (v, d) => {
+  if (v == null) return "null";
+  const s = v.toFixed(d);
+  return Number(s) === 0 ? (0).toFixed(d) : s; // no "-0.000"
+};
+const fk = (k) => (k == null ? "null" : String(Number(k.toPrecision(4))));
+
+export function fitLine(r) {
+  const mix = Object.entries(r.mix).sort((a, b) => b[1] - a[1]).map(([f, s]) => `${f}:${s.toFixed(2)}`).join(",");
+  return `fit: k=${fk(r.k)} pairs=${r.pairs} rms=${fnum(r.rms, 3)} unmetered=${fnum(r.unmetered, 3)}%/h mix=${mix}`;
+}
+
+export function backtestLine(r) {
+  return `backtest: n=${r.n} mae=${fnum(r.mae, 3)} max_err=${fnum(r.max_err, 3)} under_predict=${r.under_predict}`;
+}
 
 const fmt = (n) => {
   const a = Math.abs(n);
@@ -289,12 +446,12 @@ export function main(argv) {
   const [cmd, ...rest] = argv;
   const fail = (m) => { console.error(`cc-ledger: ${m}\n${USAGE}`); return 2; };
   const flags = { json: false };
-  const valued = cmd === "scan" ? "--budget-ms" : cmd === "summary" ? "--hours" : null;
-  if (!valued) return fail(cmd ? `unknown command: ${cmd}` : "missing command");
+  const valued = cmd === "scan" ? "--budget-ms" : cmd === "summary" ? "--hours" : cmd === "fit" || cmd === "backtest" ? "" : null;
+  if (valued == null) return fail(cmd ? `unknown command: ${cmd}` : "missing command");
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (a === "--json") flags.json = true;
-    else if (a === valued) {
+    else if (valued && a === valued) {
       const v = rest[++i];
       const n = Number(v);
       if (v == null || v === "" || !Number.isFinite(n) || n < 0 || (valued === "--hours" && n <= 0)) {
@@ -308,8 +465,15 @@ export function main(argv) {
     if (flags.json) console.log(JSON.stringify(r));
     else {
       const mb = (r.bytes_read / 1e6).toFixed(1);
-      console.log(`ledger: ${r.counted} msgs, ${r.files_read}/${r.files} files, ${mb} MB in ${r.ms} ms${r.partial ? " partial" : ""}`);
+      console.log(`ledger: ${r.counted} msgs, ${r.files_read}/${r.files} files, ${mb} MB in ${r.ms} ms${r.partial ? " partial" : ""}${r.errors ? ` ${r.errors} errors` : ""}`);
     }
+    return 0;
+  }
+  if (cmd === "fit" || cmd === "backtest") {
+    const buckets = loadState().buckets;
+    const snaps = readHistory();
+    const r = cmd === "fit" ? fit(snaps, buckets) : backtest(snaps, buckets);
+    console.log(flags.json ? JSON.stringify(r) : cmd === "fit" ? fitLine(r) : backtestLine(r));
     return 0;
   }
   const s = summary(loadState(), flags.value ?? 24);
