@@ -96,8 +96,9 @@
 // - SIGTERM / SIGINT / SIGHUP to oc-worker while a run holds its slots (exit "killed"): the attempt's process group gets
 //   SIGTERM, then SIGKILL after 5 s if it is still there, and the proc-tree sweep kills the leftover descendants. Both
 //   slots are released, the receipt is written with exit "killed" (errors: "killed by <SIGNAL>"), the stream run-done is
-//   appended, and oc-worker exits 143 / 130 / 129. A second signal during cleanup is ignored. While still waiting for a
-//   slot nothing is held, so the signal just ends the process (no receipt).
+//   appended, and oc-worker exits 143 / 130 / 129. A second signal during cleanup is ignored. While a slot wait is in
+//   progress, any held provider slot and the registry entry are released and oc-worker exits 143/130/129 with no
+//   receipt (nothing ran).
 // - --agent cc-worker | cc-worker-strong | cc-critic | cc-senior (any key of `cc.models`): the backend is headless
 //   Claude Code, not OpenCode. The cc agents are the keys of `cc.models` in usage-limits.json merged over the default
 //   {"cc-worker":"sonnet","cc-worker-strong":"opus","cc-critic":"opus","cc-senior":"fable"} (only "cc-" keys count);
@@ -2087,7 +2088,7 @@ export async function runWorker(a) {
     // set only when the receipt exit is escaped-worktree (a completed write);
     // an attempted-only escape (path recorded, no completed write) leaves exit
     // and status unchanged — it is a warning, not a failure.
-    if (receipt.exit === "escaped-worktree" && !sig.name) receipt.status = 5;
+    if (receipt.exit === "escaped-worktree" && !killedBySignal) receipt.status = 5;
     return receipt;
   } finally {
     clearInterval(kickTimer);

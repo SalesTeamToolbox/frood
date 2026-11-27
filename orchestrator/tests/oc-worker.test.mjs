@@ -1814,6 +1814,7 @@ test("sleep: a host sleep (SIGSTOP) past the original deadline extends it and re
     assert.ok(receipt.slept_ms > 0, `slept_ms must be > 0, got ${receipt.slept_ms}`);
   } finally {
     clearTimeout(hard);
+    if (child.exitCode === null) { try { process.kill(child.pid, "SIGCONT"); } catch {} } // resume before kill
     if (child.exitCode === null) { try { process.kill(child.pid, "SIGKILL"); } catch {} }
   }
 });
@@ -2613,6 +2614,39 @@ test("A1: SIGTERM during the resume wait writes a killed receipt and one run-don
     const done = eventsOf(sd).filter((e) => e.kind === "run-done");
     assert.equal(done.length, 1, "one run-done");
     assert.equal(done[0].exit, "killed");
+  } finally {
+    clearTimeout(hard);
+    if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch {} }
+  }
+});
+
+test("fence: a post-settle SIGTERM keeps an escaped-worktree run at status 5", async () => {
+  const dir = tmp();
+  CLEAN.push(dir);
+  // outside every allowed root (/tmp is allowed, homedir is not)
+  const outside = fs.mkdtempSync(path.join(os.homedir(), ".wtf-oc-escape-"));
+  CLEAN.push(outside);
+  const target = path.join(outside, "escaped.txt");
+  fs.writeFileSync(target, "original\n");
+  const prompt = path.join(dir, "mandate.md");
+  fs.writeFileSync(prompt, "Review the diff.");
+  const out = path.join(dir, "out", "findings-r1.md");
+  const argsFile = path.join(dir, "args.json");
+  const child = spawn(process.execPath, [BIN, "--agent", "critic", "--dir", dir, "--prompt", prompt, "--out", out], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: dir, FAKE_OC_ARGS_FILE: argsFile, FAKE_OC_MODE: "escape-edit", FAKE_OC_TARGET: target, ORCH_TEST_POSTRUN_PAUSE_MS: "4000" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const exited = new Promise((res) => child.on("close", (code, signal) => res({ code, signal })));
+  const hard = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 30000);
+  try {
+    for (let i = 0; i < 100 && !fs.existsSync(out); i++) await sleep(50);
+    assert.ok(fs.existsSync(out), "<out> written by the completed escape");
+    await sleep(150); // enter the postrun pause
+    assert.equal(child.exitCode, null, "still paused after <out>");
+    child.kill("SIGTERM");
+    const res = await exited;
+    // escaped-worktree keeps status 5 despite the post-settle signal (not sig.code 143, not clean 0)
+    assert.equal(res.code, 5, `expected exit 5 (escaped-worktree), got ${JSON.stringify(res)}`);
   } finally {
     clearTimeout(hard);
     if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch {} }
