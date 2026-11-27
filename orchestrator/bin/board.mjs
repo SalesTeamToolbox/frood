@@ -1113,8 +1113,9 @@ function cmdRound(ctx, id) {
       // critic's reply cannot be trusted at all. Refuse it before the round cap so it never burns a counted round and
       // never blocks the ticket (a refused INVALID must never reach rounds_exhausted). It is also placed before the
       // scope fence: you cannot meaningfully fence a diff against a malformed review, so fix the paperwork first
-      // (save the critic's reply verbatim and re-run `round`; if the critic's own reply lacks the section, re-run
-      // the critic) and let the fence apply once the findings gate clean.
+      // (save the critic's reply verbatim to the findings file and re-run `round`; if the critic's own reply lacks
+      // the section, re-run the critic). If the same round also leaves `--scope`, revert that file instead — the
+      // fence would reject the diff anyway, so re-running the critic would be wasted work.
       if (critic.effective === "INVALID") {
         throw new Refuse(
           `findings gate INVALID — ${critic.reasons.join("; ")} — save the critic's reply verbatim to the findings file and re-run round; if the critic's own reply lacks the section, re-run the critic`,

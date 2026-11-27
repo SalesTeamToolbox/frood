@@ -322,8 +322,9 @@ Code, read it before dispatching). Spawn the named agent — never hand-type a m
    no summary, no renumbering. The board re-gates the file and refuses a findings file the
    gate marks INVALID (no BLAST RADIUS section): nothing is written to the ticket, the round
    does not count, and it never burns a round of the cap. Save the critic's reply verbatim
-   and re-run `round`; if the critic's own reply lacks the section, re-run the critic. A
-   receipt with `readonly_violation` voids that review — rerun it.
+   and re-run `round`; if the critic's own reply lacks the section, re-run the critic. If
+   the same round also leaves `--scope`, revert that file instead — the fence would reject
+   the diff anyway. A receipt with `readonly_violation` voids that review — rerun it.
    <!-- cc-only -->
    Claude Code: `Agent(subagent_type: "critic")` (Sonnet).
    <!-- /cc-only -->
