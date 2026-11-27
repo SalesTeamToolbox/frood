@@ -61,6 +61,12 @@ function mergeBase(repo, ref, sha) {
 }
 function diffFrom(repo, base, sha, baseRef) {
   if (!baseRef) return base;
+  // Resolve sha to its full form once so the M == sha check below (a branch already
+  // merged into the ref would diff empty and pass vacuously) works even if a caller
+  // passes a short sha.
+  const full = git(repo, ["rev-parse", "--verify", `${sha}^{commit}`]);
+  if (full.error || full.status !== 0) return base;
+  const fullSha = String(full.stdout || "").trim();
   // Candidate refs: baseRef itself, plus its local branch counterpart when baseRef is a remote-tracking ref
   // (<remote>/<branch>) that resolves under refs/remotes/.
   const refs = [baseRef];
@@ -76,7 +82,7 @@ function diffFrom(repo, base, sha, baseRef) {
   let from = base;
   for (const ref of refs) {
     const m = mergeBase(repo, ref, sha);
-    if (!m || m === sha) continue; // merged into the ref: empty diff would be a vacuous pass
+    if (!m || m === fullSha) continue; // merged into the ref: empty diff would be a vacuous pass
     if (!isAncestor(repo, base, m)) continue; // base not an ancestor of M: stale, keep base
     // Accept the newest: the one the current `from` is an ancestor of.
     if (from === base || isAncestor(repo, from, m)) from = m;

@@ -17,7 +17,7 @@ after(() => {
 });
 
 function git(cwd, ...args) {
-  const r = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
+  const r = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", timeout: 30_000 });
   assert.equal(r.status, 0, `git ${args.join(" ")}: ${r.stderr}`);
   return r.stdout.trim();
 }
