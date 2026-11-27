@@ -68,13 +68,19 @@ Orchestrator writes the ticket + Mandate → **worker** codes in the ticket work
      resumes dropped Nvidia runs on the same session. Per-ticket exception: if worker-nvidia dropped
      (receipt exit `timeout`/`stalled`) on 2 earlier rounds of the same run dir, the next round leaves
      worker-nvidia out.
-  4. **The Claude Code `worker` (Sonnet) is never a fallback; preferred first only when pace is UNDER.**
-     `oc-worker --role worker` puts `cc-worker` (headless Claude Code, Sonnet) first by itself when the
-     `pace:` line reads UNDER (never on a `ses_` `--session` round). A revision round after a `cc-worker`
-     receipt is `--agent cc-worker --session <id>`; `--role worker --session <id>` routes an id that does
-     not start with `ses_` to `cc-worker` by itself, in any pace state. Otherwise use the in-session Claude Code
-     `worker` agent only when every OpenCode pool, including Nvidia after its retry, is out. The receipt
-     states that reason, and the orchestrator tells the owner.
+  4. **Headless Claude Code agents are never a fallback; preferred first only when pace is UNDER.**
+     The pace role table (`PACE_POLICY`, `bin/pace-read.mjs`): `worker` → `cc-worker`, `worker-strong` →
+     `cc-worker-strong`, `critic` → `cc-critic`, `senior` → `cc-senior` (not while Fable is over).
+     `scout` and `orchestrator` are never paced. A guarded-path senior review stays the in-session Fable
+     `senior`. `cc-senior` via `--role senior` is for non-guarded reviews only. When the `pace:` line reads UNDER, `oc-worker --role <role>`
+     puts that cc agent first by itself. Any other pace state keeps today's chain.
+     A `--session` never pace-prepends. `--role <role> --session <id>` with an id that does not start with
+     `ses_` resumes on the role's cc agent, in any pace state. A `ses_` id keeps today's chain.
+     A revision round after a cc receipt is `--agent <cc agent> --session <id>`.
+     The desk's critic launch (`--role critic`) gets `cc-critic` by itself on UNDER. Its critic retry uses
+     the unpaced chain, on purpose.
+     Otherwise use the in-session Claude Code `worker` agent only when every OpenCode pool, including Nvidia
+     after its retry, is out. The receipt states that reason, and the orchestrator tells the owner.
   5. **Revision rounds stay on the same agent and session (`--session`).** Switch to the next stronger
      pool only after 2 rounds on one model. This replaces "round 2+ goes paid".
 

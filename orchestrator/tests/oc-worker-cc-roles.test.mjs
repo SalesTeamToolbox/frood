@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { READONLY_AGENT_RE, VERDICT_AGENT_RE, ccModels, isCcAgent, isCcReader, ccSlotKey, ccModelFor, ccToolArgs, capReader, paceDecision, gateFree } from "../bin/oc-worker.mjs";
+import { READONLY_AGENT_RE, VERDICT_AGENT_RE, ccModels, isCcAgent, isCcReader, ccSlotKey, ccModelFor, ccToolArgs, capReader, paceDecision, gateFree, args as parseArgs } from "../bin/oc-worker.mjs";
 import { isCcPool } from "../bin/pool-health.mjs";
 import { installFixtureGuard } from "./fixtures/fixture-guard.mjs";
 
@@ -23,9 +23,18 @@ const CLEAN = [];
 after(() => {
   for (const d of CLEAN) fs.rmSync(d, { recursive: true, force: true, maxRetries: 10 });
 });
-const tmp = () => {
+// Every temp home carries the cc readers' role contracts (<home>/.claude/agents/{critic,senior}.md, A4 r2): a cc reader
+// without one is skipped (cc-no-contract). Pass { contracts: false } for a home without them.
+const CONTRACT = (role) => `---\nname: ${role}\nmodel: sonnet\nFRONTMATTER-MARKER-${role}\n---\nCONTRACT-MARKER-${role}: you are the ${role}.\n`;
+function writeContracts(home, roles = ["critic", "senior"]) {
+  const d = path.join(home, ".claude", "agents");
+  fs.mkdirSync(d, { recursive: true });
+  for (const r of roles) fs.writeFileSync(path.join(d, `${r}.md`), CONTRACT(r));
+}
+const tmp = ({ contracts = true } = {}) => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), "orch-ccroles-"));
   CLEAN.push(d);
+  if (contracts) writeContracts(d);
   return d;
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -129,7 +138,7 @@ test("cc.models from usage-limits.json merges over the default; capReader reads 
 });
 
 test("paceDecision carries fable_over only when set (the round-trip without it is unchanged)", () => {
-  const cc_pace = { state: "on", weekly: 1, projected: 2, at: "t", prepended: false, shadow: null };
+  const cc_pace = { state: "on", weekly: 1, projected: 2, at: "t", prepended: false, role: null, shadow: null };
   assert.deepEqual(paceDecision(JSON.stringify({ cc_pace, chain: null })), { cc_pace, chain: null });
   assert.deepEqual(paceDecision(JSON.stringify({ cc_pace, chain: null, fable_over: true })), { cc_pace, chain: null, fable_over: true });
 });
@@ -332,4 +341,106 @@ test("a lone cc-critic whose ccread wait times out ends with exit cc-slot-timeou
   assert.equal(saved.exit, "cc-slot-timeout");
   assert.equal(r.argv, null, "claude never started");
   fs.rmSync(held, { recursive: true, force: true });
+});
+
+// ---- cc-pacing-v2 A4: --role <r> --session <Claude id> resumes on r's cc agent, in every pace state ----
+test("A4 --session: --role critic --session <Claude id> → cc-critic first in every pace state, no pace read; ses_ → today", () => {
+  const home = tmp();
+  const prompt = path.join(home, "m.md");
+  fs.writeFileSync(prompt, "Review.");
+  const CLAUDE = "7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f";
+  const CRITIC = ["critic", "critic-go", "critic-nvidia", "critic-free"];
+  const dry = (role, session, pace) => {
+    let reads = 0;
+    const a = parseArgs(["--role", role, "--session", session, "--dir", home, "--prompt", prompt, "--out", path.join(home, "o.md")], { pace: () => (reads++, pace) });
+    return { chain: [a.agent, ...a.fallback], prepended: a.pacePrepended === true, reads };
+  };
+  for (const state of ["under", "on", "over", "unknown", "off"]) {
+    for (const fable of ["ok", "over"]) {
+      const pace = { state, fable: { state: fable } };
+      const r = dry("critic", CLAUDE, pace);
+      assert.deepEqual(r.chain, ["cc-critic", ...CRITIC], `${state}/${fable}`);
+      assert.equal(r.prepended, false);
+      assert.equal(r.reads, 0);
+      assert.deepEqual(dry("critic", "ses_x", pace).chain, CRITIC, `${state}/${fable} ses_`);
+      assert.deepEqual(dry("senior", CLAUDE, pace).chain, ["cc-senior", "senior", "senior-nvidia", "senior-free"], "a Claude session resumes on cc-senior even with Fable over");
+      assert.deepEqual(dry("worker-strong", CLAUDE, pace).chain, ["cc-worker-strong", "worker-strong", "worker-nvidia", "worker-free"]);
+      assert.deepEqual(dry("scout", CLAUDE, pace).chain, ["scout", "worker-nvidia", "critic-nvidia"], "scout is never paced");
+    }
+  }
+});
+
+// ---- cc-pacing-v2 A4 r2: a cc reader runs with its role contract (--append-system-prompt-file), or not at all ----
+for (const [agent, role] of [["cc-critic", "critic"], ["cc-senior", "senior"]]) {
+  test(`${agent}: --append-system-prompt-file right after --settings carries the ${role}.md body, not its frontmatter; read-only fence footer`, () => {
+    const home = tmp();
+    const r = runSync(home, agent, `k-${role}`, ["--no-detach"]);
+    assert.equal(r.status, 0, r.stderr);
+    const argv = r.argv;
+    const i = argv.indexOf("--append-system-prompt-file");
+    assert.ok(i > 0, JSON.stringify(argv));
+    assert.equal(argv[i - 2], "--settings", "placed after --settings, before the variadic --tools");
+    assert.ok(i < argv.indexOf("--tools"));
+    const file = argv[i + 1];
+    assert.equal(file, r.out + ".contract.md", "the contract file sits beside the run's out file, not in the worktree");
+    const body = fs.readFileSync(file, "utf8");
+    assert.match(body, new RegExp(`^CONTRACT-MARKER-${role}: you are the ${role}\\.`));
+    assert.doesNotMatch(body, /FRONTMATTER-MARKER|^---|model: sonnet/m);
+    assert.doesNotMatch(argv[1], /Create and edit files/, "a cc reader is not told to create and edit files");
+    assert.match(argv[1], /do not create or edit files in it/);
+    assert.equal(r.receipt.agent, agent);
+  });
+}
+
+test("cc reader with no contract file: hop skipped as cc-no-contract (no attempt), the OpenCode fallback runs, receipt records it", () => {
+  const home = tmp({ contracts: false });
+  const r = runSync(home, "cc-critic", "nc", ["--no-detach", "--fallback", "critic"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.receipt.agent, "critic", "the next chain agent ran");
+  assert.equal(r.argv, null, "claude never started");
+  const want = `cc-no-contract: ${path.join(home, ".claude", "agents", "critic.md")}`;
+  assert.ok(r.receipt.repooled_from.some((h) => h.agent === "cc-critic" && h.skipped && h.reason === want), JSON.stringify(r.receipt.repooled_from));
+  assert.ok(r.receipt.notes.includes(want));
+  assert.equal(r.receipt.attempts, 1, "the skipped reader used no attempt");
+  const saved = JSON.parse(fs.readFileSync(r.out + ".receipt.json", "utf8"));
+  assert.ok(saved.notes.includes(want));
+  // a frontmatter-only file is no contract either
+  writeContracts(home, []);
+  fs.writeFileSync(path.join(home, ".claude", "agents", "senior.md"), "---\nname: senior\n---\n\n");
+  const s = runSync(home, "cc-senior", "ns", ["--no-detach"]);
+  assert.equal(s.status, 6, s.stderr);
+  assert.equal(s.argv, null);
+  assert.ok(s.receipt.errors.some((e) => /^cc-no-contract: /.test(e)), JSON.stringify(s.receipt.errors));
+});
+
+test("cc-worker and cc-worker-strong get no contract flag (writer argv unchanged)", () => {
+  const home = tmp();
+  for (const agent of ["cc-worker", "cc-worker-strong"]) {
+    const r = runSync(home, agent, `w-${agent}`, ["--no-detach"]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(!r.argv.includes("--append-system-prompt-file"), agent);
+    assert.match(r.argv[1], /Create and edit files only under it/, "writers keep the shared fence footer");
+  }
+});
+
+test("desk-shaped: --role critic on an under pace → cc-critic with its contract, a gate-valid reply → gate APPROVED", () => {
+  const home = tmp();
+  const now = Date.now();
+  const H = 3600 * 1000;
+  const snap = { at: new Date(now - 10 * 60 * 1000).toISOString(), source: "app", five_hour: { pct: 0, resets_at: new Date(now + 3 * H).toISOString() }, weekly: { pct: 10, resets_at: new Date(now + 100 * H).toISOString() }, fable: null };
+  fs.mkdirSync(orchDir(home), { recursive: true });
+  fs.writeFileSync(path.join(orchDir(home), "cc-usage.json"), JSON.stringify(snap) + "\n");
+  fs.writeFileSync(path.join(orchDir(home), "cc-usage.jsonl"), JSON.stringify(snap) + "\n");
+  const s = setup(home, "desk");
+  const reply = "VERDICT: APPROVED\nTESTS: npm test -> 10 pass\nBLAST RADIUS:\n- bin/x.mjs:1 - unchanged\nSENIOR_REVIEW: not-needed - small\n";
+  const r = spawnSync(process.execPath, [BIN, "--role", "critic", "--dir", s.dir, "--prompt", s.prompt, "--out", s.out], { env: env(home, { ORCH_NO_PACE: undefined, ORCH_PACE_BIN: undefined, FAKE_CC_TEXT: reply, FAKE_CC_ARGS_FILE: s.argsFile, FAKE_CC_ARGV_OUT: s.argvOut }), encoding: "utf8", timeout: 60000 });
+  assert.equal(r.status, 0, r.stderr);
+  const receipt = JSON.parse(r.stdout.trim().split("\n").filter((l) => l.startsWith("{")).pop());
+  assert.equal(receipt.agent, "cc-critic");
+  assert.equal(receipt.cc_pace.state, "under");
+  assert.equal(receipt.cc_pace.prepended, true);
+  assert.equal(receipt.cc_pace.role, "critic");
+  assert.equal(receipt.gate?.effective, "APPROVED", JSON.stringify(receipt.gate));
+  const argv = JSON.parse(fs.readFileSync(s.argvOut, "utf8"));
+  assert.match(fs.readFileSync(val(argv, "--append-system-prompt-file"), "utf8"), /CONTRACT-MARKER-critic/);
 });

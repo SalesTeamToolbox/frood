@@ -430,7 +430,8 @@ test("CLI status / no-arg output unchanged by the advisor", () => {
 test("desk-check runs one silent advise tick: stdout and exit code unchanged", () => {
   const s = sandbox();
   fs.writeFileSync(s.limits, JSON.stringify({ cc: { resets: [{ kind: "full", count: 1, expires_at: iso(Date.now() + 20 * HOUR) }] } }));
-  const r = spawnSync(process.execPath, [DESK_CHECK], { env: s.env(), encoding: "utf8", timeout: 30000 });
+  // ORCH_CC_PROJECTS → a missing dir: the A2 ledger tick must not scan the owner's real transcripts
+  const r = spawnSync(process.execPath, [DESK_CHECK], { env: s.env({ ORCH_CC_PROJECTS: path.join(s.home, "no-cc-projects") }), encoding: "utf8", timeout: 30000 });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, "");
   const st = JSON.parse(fs.readFileSync(s.state, "utf8"));

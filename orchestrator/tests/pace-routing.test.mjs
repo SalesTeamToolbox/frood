@@ -9,7 +9,8 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { args, paceDecision } from "../bin/oc-worker.mjs";
-import { readPace, paceChain, ccPaceRecord } from "../bin/pace-read.mjs";
+import { readPace, paceChain, ccPaceRecord, PACE_POLICY } from "../bin/pace-read.mjs";
+import { markDown } from "../bin/pool-health.mjs";
 import { checkRouting } from "../bin/check-routing.mjs";
 import { installFixtureGuard } from "./fixtures/fixture-guard.mjs";
 
@@ -26,6 +27,15 @@ const GOLD = path.join(HERE, "fixtures", "router-health-golden");
 const FULL = fs.readFileSync(path.join(GOLD, "full.txt"), "utf8");
 const FRESH = fs.readFileSync(path.join(GOLD, "if-stale-fresh.txt"), "utf8");
 const OVER_ADVICE = "pace: OVER — conserve: no Fable senior unless guarded; scouts haiku";
+const OVER_ROLES = "pace: OVER — critic and senior via oc-worker --role, not Agent(critic|senior) unless guarded";
+/** The golden with `roles` on an `under` pace: `use cc-<role> (pace UNDER), fallback <today's use>` (cc-pacing-v2 A4). */
+function underBody(roles = ["worker", "worker-strong", "critic", "senior"]) {
+  let b = FULL;
+  for (const role of roles) b = b.replace(new RegExp(`^(${role} +use )`, "m"), `$1${PACE_POLICY[role]} (pace UNDER), fallback `);
+  // a guarded-path senior review stays the in-session Fable senior (A4 r2)
+  if (roles.includes("senior")) b = b.replace(/^(senior +use .*)$/m, "$1 (not for guarded paths)");
+  return b;
+}
 const TODAY = ["worker-nvidia", "worker", "worker-free"];
 
 const CLEAN = [];
@@ -41,17 +51,17 @@ const tmp = (p = "orch-pace-") => {
 // ---- pace fixtures: M1 snapshots in <ORCH_HOME>/.config/orchestrator/cc-usage.json, `at` relative to now ----
 const H = 3600 * 1000;
 const iso = (ms) => new Date(ms).toISOString();
-function snapshot(state) {
+function snapshot(state, { fable = null } = {}) {
   const now = Date.now();
   const at = iso(now - 10 * 60 * 1000);
-  if (state === "under") return { at, source: "app", five_hour: { pct: 0, resets_at: iso(now + 3 * H) }, weekly: { pct: 10, resets_at: iso(now + 100 * H) }, fable: null };
+  if (state === "under") return { at, source: "app", five_hour: { pct: 0, resets_at: iso(now + 3 * H) }, weekly: { pct: 10, resets_at: iso(now + 100 * H) }, fable };
   // early week (E < 12 h) reads `on` whatever the projection
   if (state === "on") return { at, source: "app", five_hour: { pct: 0, resets_at: iso(now + 3 * H) }, weekly: { pct: 1, resets_at: iso(now + 160 * H) }, fable: null };
   if (state === "over") return { at, source: "app", five_hour: { pct: 90, resets_at: iso(now + 3 * H) }, weekly: { pct: 10, resets_at: iso(now + 100 * H) }, fable: null };
   return null; // unknown: no snapshot; off: ORCH_NO_PACE=1
 }
-function paceHome(state, h = tmp()) {
-  const snap = snapshot(state);
+function paceHome(state, h = tmp(), opts = {}) {
+  const snap = snapshot(state, opts);
   if (snap) {
     const d = path.join(h, ".config", "orchestrator");
     fs.mkdirSync(d, { recursive: true });
@@ -85,8 +95,8 @@ const ALL = {
   critic: "opencode-go/claude-haiku-5-5", "critic-go": "opencode-go/deepseek-v4.1-flash", "critic-nvidia": "nvidia/minimaxai/minimax-m3.1-flash", "critic-free": "opencode/minimax-m3.1-flash-free",
   scout: "opencode/mimo-v2.6-flash-free", senior: "opencode-go/deepseek-v4-pro", orchestrator: "opencode-go/muse-spark-1.3-contributor",
 };
-function rhHome(state) {
-  const h = paceHome(state);
+function rhHome(state, opts = {}) {
+  const h = paceHome(state, tmp(), opts);
   const d = path.join(h, ".config", "opencode", "agents");
   fs.mkdirSync(d, { recursive: true });
   for (const [n, m] of Object.entries(ALL)) fs.writeFileSync(path.join(d, `${n}.md`), `---\nmode: subagent\nmodel: ${m}\n---\nx\n`);
@@ -117,22 +127,21 @@ for (const state of ["off", "unknown", "on", "over", "under"]) {
     if (state === "off") assert.equal(line, "OFF");
     if (state === "unknown") assert.equal(line, "UNKNOWN (no snapshot)");
     assert.match(line, new RegExp(`^${state.toUpperCase()}\\b`));
-    const head = `pace: ${line}\n${state === "over" ? OVER_ADVICE + "\n" : ""}`;
-    const body = state === "under"
-      ? FULL.replace(/^worker {9}use /m, "worker         use cc-worker (pace UNDER), fallback ")
-      : FULL;
+    const head = `pace: ${line}\n${state === "over" ? OVER_ADVICE + "\n" + OVER_ROLES + "\n" : ""}`;
+    const body = state === "under" ? underBody() : FULL;
     if (state === "under") {
-      assert.notEqual(body, FULL);
       assert.match(body, /^worker {9}use cc-worker \(pace UNDER\), fallback worker-nvidia 👁$/m);
+      assert.match(body, /^worker-strong  use cc-worker-strong \(pace UNDER\), fallback worker-strong 👁$/m);
+      assert.match(body, /^critic {9}use cc-critic \(pace UNDER\), fallback critic$/m);
+      assert.match(body, /^senior {9}use cc-senior \(pace UNDER\), fallback senior \(not for guarded paths\)$/m);
     }
     assert.equal(full.stdout, head + body);
-    // only the worker line may differ from the golden: critic, senior, scout, orchestrator, worker-strong as captured
+    // under changes exactly the 4 policy lines; scout, orchestrator and every other line are as captured
     const gold = FULL.split("\n");
-    const got = full.stdout.split("\n").slice(state === "over" ? 2 : 1);
-    for (const role of ["worker-strong", "critic", "scout", "senior", "orchestrator"]) {
-      const re = new RegExp(`^${role} `);
-      assert.equal(got.find((l) => re.test(l)), gold.find((l) => re.test(l)), role);
-    }
+    const got = full.stdout.split("\n").slice(state === "over" ? 3 : 1);
+    assert.equal(got.length, gold.length);
+    const changed = got.map((l, k) => (l === gold[k] ? null : l.split(/\s/)[0])).filter(Boolean);
+    assert.deepEqual(changed, state === "under" ? ["worker", "worker-strong", "critic", "senior"] : []);
     const fresh = rh(h, env, "--if-stale", "24");
     assert.equal(fresh.status, 0, fresh.stderr);
     assert.equal(fresh.stdout, head + FRESH);
@@ -144,6 +153,30 @@ test("router-health: a failed pace read prints `pace: UNKNOWN (<reason>)` and th
   const r = rh(h, { ORCH_PACE_BIN: path.join(h, "missing", "cc-pace.mjs") });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, "pace: UNKNOWN (pace read failed: missing cc-pace.mjs)\n" + FULL);
+});
+
+test("router-health under: a down cc-* pool leaves its line as today; a cc quota mark holds all four as today", () => {
+  const h = rhHome("under");
+  const line = expectedLine(h, {});
+  // a `dropped` mark holds down only its own key: the critic line is today's, the other three still cc
+  withEnv({ ORCH_HOME: h }, () => markDown("cc-critic", { reason: "dropped", ms: H, detail: "test" }));
+  let r = rh(h, {});
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, `pace: ${line}\n` + underBody(["worker", "worker-strong", "senior"]));
+  // a subscription mark (quota) on any cc-* key holds the whole cc group down: every line is today's
+  withEnv({ ORCH_HOME: h }, () => markDown("cc-worker", { reason: "quota", ms: H, detail: "test" }));
+  r = rh(h, {});
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, `pace: ${line}\n` + FULL);
+});
+
+test("router-health under with Fable over: the senior line stays today's; worker, worker-strong and critic change", () => {
+  const h = rhHome("under", { fable: { pct: 90 } });
+  const line = expectedLine(h, {});
+  assert.match(line, /^UNDER\b.*fable 90%/);
+  const r = rh(h, {});
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, `pace: ${line}\n` + underBody(["worker", "worker-strong", "critic"]));
 });
 
 test("router-health --json: top-level pace key; the router-health.json stamp never holds it; --decide output unchanged", () => {
@@ -190,14 +223,28 @@ test("readPace: parses cc-pace JSON; ORCH_NO_PACE=1 → off; every failure → u
   assert.deepEqual(withEnv({ ORCH_HOME: h, ORCH_PACE_BIN: slow }, () => readPace({ timeoutMs: 300 })), { state: "unknown", reason: "pace read failed: timeout" });
 });
 
-test("paceChain: cc-worker first only for role worker on under; same contents otherwise", () => {
+test("paceChain (v1 worker vectors): cc-worker first for role worker on under; same contents otherwise", () => {
   assert.deepEqual(paceChain("worker", TODAY, { state: "under" }), ["cc-worker", ...TODAY]);
   for (const s of ["off", "unknown", "on", "over"]) assert.deepEqual(paceChain("worker", TODAY, { state: s }), TODAY);
-  assert.deepEqual(paceChain("worker-strong", ["worker-strong", "worker-nvidia", "worker-free"], { state: "under" }), ["worker-strong", "worker-nvidia", "worker-free"]);
-  assert.deepEqual(paceChain("critic", ["critic"], { state: "under" }), ["critic"]);
   assert.deepEqual(paceChain("worker", TODAY, null), TODAY);
-  assert.deepEqual(ccPaceRecord({ state: "under", weekly: 10, projected: 29.7, at: "x", reason: "r" }, true), { state: "under", weekly: 10, projected: 29.7, at: "x", prepended: true, shadow: null });
-  assert.deepEqual(ccPaceRecord(null), { state: "unknown", weekly: null, projected: null, at: null, prepended: false, shadow: null });
+  assert.deepEqual(ccPaceRecord({ state: "under", weekly: 10, projected: 29.7, at: "x", reason: "r" }, true), { state: "under", weekly: 10, projected: 29.7, at: "x", prepended: true, role: null, shadow: null });
+  assert.deepEqual(ccPaceRecord(null), { state: "unknown", weekly: null, projected: null, at: null, prepended: false, role: null, shadow: null });
+});
+
+test("PACE_POLICY: the role table; paceChain never duplicates an agent already first; unknown roles unchanged", () => {
+  assert.deepEqual({ ...PACE_POLICY }, { worker: "cc-worker", "worker-strong": "cc-worker-strong", critic: "cc-critic", senior: "cc-senior" });
+  assert.ok(Object.isFrozen(PACE_POLICY));
+  const under = { state: "under" };
+  assert.deepEqual(paceChain("critic", ["cc-critic", "critic"], under), ["cc-critic", "critic"]);
+  assert.deepEqual(paceChain("toString", ["x"], under), ["x"], "no prototype keys");
+  assert.deepEqual(paceChain(undefined, ["x"], under), ["x"]);
+});
+
+test("ccPaceRecord.role: the --role string, null for --agent / junk", () => {
+  assert.equal(ccPaceRecord({ state: "on" }, false, "critic").role, "critic");
+  assert.equal(ccPaceRecord({ state: "on" }, false, null).role, null);
+  assert.equal(ccPaceRecord({ state: "on" }, false, "").role, null);
+  assert.equal(ccPaceRecord({ state: "on" }, false, 7).role, null);
 });
 
 // ---- oc-worker --role expansion (dry: args() with the pace injected) ----
@@ -225,11 +272,11 @@ test("oc-worker --role worker: under → cc-worker first; off/unknown/on/over �
   }
 });
 
-test("oc-worker: under + --session → today's chain (no read); under + worker-strong → today's; under + 2 Nvidia drops → [cc-worker, worker, worker-free]", () => {
+test("oc-worker: under + --session → today's chain (no read); under + worker-strong → cc-worker-strong first; under + 2 Nvidia drops → [cc-worker, worker, worker-free]", () => {
   const s = dryRun(["--role", "worker", "--session", "ses_abc"], { state: "under" });
   assert.deepEqual(s.chain, TODAY);
   assert.equal(s.reads, 0, "--session pins the backend: the role expansion does not consult the pace");
-  assert.deepEqual(dryRun(["--role", "worker-strong"], { state: "under" }).chain, ["worker-strong", "worker-nvidia", "worker-free"]);
+  assert.deepEqual(dryRun(["--role", "worker-strong"], { state: "under" }).chain, ["cc-worker-strong", "worker-strong", "worker-nvidia", "worker-free"]);
   assert.deepEqual(dryRun(["--role", "worker"], { state: "under" }, { drops: 2 }).chain, ["cc-worker", "worker", "worker-free"]);
   assert.deepEqual(dryRun(["--role", "worker"], { state: "on" }, { drops: 2 }).chain, ["worker", "worker-free"]);
   // --agent launches and a launch without opts are today's behaviour
@@ -242,7 +289,9 @@ test("oc-worker: under + --session → today's chain (no read); under + worker-s
 
 test("paceDecision: the detached child's decision round-trips; junk → null", () => {
   const d = paceDecision(JSON.stringify({ cc_pace: { state: "under", weekly: 10, projected: 30, at: "t", prepended: true }, chain: ["cc-worker", "worker"] }));
-  assert.deepEqual(d, { cc_pace: { state: "under", weekly: 10, projected: 30, at: "t", prepended: true, shadow: null }, chain: ["cc-worker", "worker"] });
+  assert.deepEqual(d, { cc_pace: { state: "under", weekly: 10, projected: 30, at: "t", prepended: true, role: null, shadow: null }, chain: ["cc-worker", "worker"] });
+  const withRole = paceDecision(JSON.stringify({ cc_pace: { state: "under", prepended: true, role: "critic" }, chain: ["cc-critic", "critic"] }));
+  assert.equal(withRole.cc_pace.role, "critic", "a detached child keeps the launcher's role");
   assert.equal(paceDecision("nope"), null);
   assert.equal(paceDecision(""), null);
   const h = tmp();
@@ -271,7 +320,7 @@ function ocw(h, argvExtra, extraEnv = {}, name = "w") {
   const fileReceipt = fs.existsSync(out + ".receipt.json") ? JSON.parse(fs.readFileSync(out + ".receipt.json", "utf8")) : null;
   return { ...r, receipt: line ? JSON.parse(line) : null, fileReceipt, out };
 }
-const FIVE = ["at", "prepended", "projected", "shadow", "state", "weekly"];
+const FIVE = ["at", "prepended", "projected", "role", "shadow", "state", "weekly"];
 
 test("oc-worker under --role worker: cc-worker runs first (detached), one pace read, receipt cc_pace prepended", () => {
   const h = paceHome("under");
@@ -284,6 +333,7 @@ test("oc-worker under --role worker: cc-worker runs first (detached), one pace r
   assert.equal(r.receipt.cc_pace.state, "under");
   assert.equal(r.receipt.cc_pace.prepended, true);
   assert.equal(r.receipt.cc_pace.weekly, 10);
+  assert.equal(r.receipt.cc_pace.role, "worker", "a --role launch records its role (through the detached child)");
   assert.equal(typeof r.receipt.cc_pace.projected, "number");
   assert.equal(typeof r.receipt.cc_pace.at, "string");
   assert.deepEqual(r.fileReceipt.cc_pace, r.receipt.cc_pace);
@@ -312,13 +362,15 @@ test("oc-worker over --role worker: today's chain; --agent launch with ORCH_NO_P
   assert.equal(off.receipt.agent, "critic");
   assert.deepEqual(Object.keys(off.fileReceipt.cc_pace).sort(), FIVE);
   assert.equal(off.fileReceipt.cc_pace.state, "off");
+  assert.equal(off.fileReceipt.cc_pace.role, null, "an --agent launch records role null");
+  assert.equal(r.receipt.cc_pace.role, "worker");
 });
 
 test("oc-worker: a broken pace read records unknown and the run still succeeds", () => {
   const h = paceHome("under");
   const r = ocw(h, ["--agent", "worker"], { ORCH_PACE_BIN: path.join(h, "missing", "cc-pace.mjs") });
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(r.receipt.cc_pace, { state: "unknown", weekly: null, projected: null, at: null, prepended: false, shadow: null });
+  assert.deepEqual(r.receipt.cc_pace, { state: "unknown", weekly: null, projected: null, at: null, prepended: false, role: null, shadow: null });
   assert.deepEqual(r.fileReceipt.cc_pace, r.receipt.cc_pace);
   const role = ocw(h, ["--role", "worker"], { ORCH_PACE_BIN: path.join(h, "missing", "cc-pace.mjs") }, "r");
   assert.equal(role.status, 0, role.stderr);
@@ -438,7 +490,7 @@ test("dry: --role worker --session <non-ses_ id> → [cc-worker, today's chain] 
   }
   assert.deepEqual(dryRun(["--role", "worker", "--session", CLAUDE_SES], { state: "over" }, { drops: 2 }).chain, ["cc-worker", "worker", "worker-free"]);
   assert.deepEqual(dryRun(["--role", "worker", "--session", "ses_x"], { state: "under" }).chain, TODAY);
-  assert.deepEqual(dryRun(["--role", "worker-strong", "--session", CLAUDE_SES], { state: "under" }).chain, ["worker-strong", "worker-nvidia", "worker-free"]);
+  assert.deepEqual(dryRun(["--role", "worker-strong", "--session", CLAUDE_SES], { state: "under" }).chain, ["cc-worker-strong", "worker-strong", "worker-nvidia", "worker-free"]);
 });
 
 for (const state of ["over", "unknown"]) {
@@ -473,11 +525,63 @@ test("check-routing: --agent cc-worker (with or without --fallback) is not flagg
 test("ccPaceRecord.shadow: numbers from a pace with ledger, null without; a record's shadow round-trips (detached child)", () => {
   const pace = { state: "on", weekly: 40, projected: 70, at: "t", ledger: { k: 1e-4, rms: 0, pairs: 4, unmetered: 0, scanned_at: "s", nowcast_weekly: 41.5, ledger_rate: 0.6 } };
   const rec = ccPaceRecord(pace, false);
-  assert.deepEqual(rec, { state: "on", weekly: 40, projected: 70, at: "t", prepended: false, shadow: { nowcast_weekly: 41.5, ledger_rate: 0.6 } });
+  assert.deepEqual(rec, { state: "on", weekly: 40, projected: 70, at: "t", prepended: false, role: null, shadow: { nowcast_weekly: 41.5, ledger_rate: 0.6 } });
   assert.equal(ccPaceRecord({ ...pace, ledger: null }).shadow, null);
   assert.equal(ccPaceRecord({ state: "on" }).shadow, null);
   assert.deepEqual(ccPaceRecord({ ...pace, ledger: { nowcast_weekly: "x", ledger_rate: NaN } }).shadow, { nowcast_weekly: null, ledger_rate: null });
   assert.deepEqual(ccPaceRecord(rec, false), rec, "re-recording a record keeps its shadow");
   assert.deepEqual(paceDecision(JSON.stringify({ cc_pace: rec, chain: null })).cc_pace, rec);
   assert.deepEqual(paceChain("worker", TODAY, pace), TODAY, "the shadow never routes");
+});
+
+// ---- cc-pacing-v2 A4: the pace policy table, role × state × Fable × session ----
+test("A4 table: role × pace state × Fable × session gives exactly the policy (chain, prepended, reads)", () => {
+  const CH = { worker: TODAY, "worker-strong": ["worker-strong", "worker-nvidia", "worker-free"], critic: ["critic", "critic-go", "critic-nvidia", "critic-free"], senior: ["senior", "senior-nvidia", "senior-free"], scout: ["scout", "worker-nvidia", "critic-nvidia"], orchestrator: ["orchestrator", "orchestrator-nvidia", "orchestrator-free"] };
+  const CC = { worker: "cc-worker", "worker-strong": "cc-worker-strong", critic: "cc-critic", senior: "cc-senior" };
+  let cases = 0;
+  for (const role of Object.keys(CH)) {
+    for (const state of ["under", "on", "over", "unknown", "off"]) {
+      for (const fable of ["ok", "over"]) {
+        const pace = { state, fable: { pct: fable === "over" ? 90 : 10, state: fable } };
+        for (const session of ["none", "ses_abc", CLAUDE_SES]) {
+          const extra = session === "none" ? [] : ["--session", session];
+          const r = dryRun(["--role", role, ...extra], pace);
+          let chain = CH[role];
+          let prepended = false;
+          if (session === "none") {
+            if (state === "under" && CC[role] && !(role === "senior" && fable === "over")) {
+              chain = [CC[role], ...chain];
+              prepended = true;
+            }
+          } else if (session === CLAUDE_SES && CC[role]) chain = [CC[role], ...chain];
+          const tag = `${role} ${state} fable=${fable} session=${session}`;
+          assert.deepEqual(r.chain, chain, tag);
+          assert.equal(r.prepended, prepended, tag);
+          // paceChain itself, whatever the session: the cc-first chain exactly when the policy prepends, else the baseline
+          const paced = state === "under" && CC[role] && !(role === "senior" && fable === "over") ? [CC[role], ...CH[role]] : CH[role];
+          assert.deepEqual(paceChain(role, CH[role], pace), paced, tag);
+          if (session !== "none") assert.equal(r.reads, 0, `${tag}: a --session never reads the pace in the role expansion`);
+          cases++;
+        }
+      }
+    }
+  }
+  assert.equal(cases, 6 * 5 * 2 * 3);
+});
+
+test("A4: --role critic --session <Claude id> resumes on cc-critic (fake claude gets --resume <id>); receipt cc_pace.role critic", () => {
+  for (const state of ["over", "unknown"]) {
+    const h = paceHome(state);
+    fs.mkdirSync(path.join(h, ".claude", "agents"), { recursive: true });
+    fs.writeFileSync(path.join(h, ".claude", "agents", "critic.md"), "---\nname: critic\n---\nCritic contract.\n"); // A4 r2: a cc reader needs its contract
+    const ccArgs = path.join(h, "cc-args.json");
+    const r = ocw(h, ["--role", "critic", "--session", CLAUDE_SES], { FAKE_CC_ARGS_FILE: ccArgs });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.receipt.agent, "cc-critic", state);
+    const { argv } = JSON.parse(fs.readFileSync(ccArgs, "utf8"));
+    assert.equal(argv[argv.indexOf("--resume") + 1], CLAUDE_SES);
+    assert.equal(r.receipt.cc_pace.state, state);
+    assert.equal(r.receipt.cc_pace.prepended, false);
+    assert.equal(r.receipt.cc_pace.role, "critic");
+  }
 });

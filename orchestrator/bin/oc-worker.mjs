@@ -105,7 +105,11 @@
 //   Readers (cc-critic, cc-senior: a cc agent matching READONLY_AGENT_RE): `--tools Read,Grep,Glob,Bash
 //   --strict-mcp-config --allowedTools Bash --disallowedTools Edit,Write,NotebookEdit` in place of the writer tool
 //   flags, and no acceptEdits; they get the read-only guard (scratch footer, tamper and worktree check,
-//   readonly_violation) and the verdict gate like an OpenCode critic. Plus `--resume <id>` for --session and the
+//   readonly_violation) and the verdict gate like an OpenCode critic. A reader also gets its role contract:
+//   `--append-system-prompt-file <out>.contract.md` right after --settings, the body (frontmatter stripped) of
+//   <ORCH_HOME or home>/.claude/agents/<role>.md (cc-critic → critic.md, cc-senior → senior.md), and a read-only fence
+//   footer. A missing or empty contract file skips the hop (reason and receipt note `cc-no-contract: <file>`, no attempt
+//   used), so the chain falls back to the OpenCode reader; a reader never runs contract-less. Plus `--resume <id>` for --session and the
 //   automatic resume. Hook-free: the owner's
 //   Stop hooks (an asyncRewake peer-mail wake, the repo's learning hooks) would keep a finished run alive and dirty the
 //   worktree; the child env also gets PEER_WAKE_MAX_MIN=0 (overriding any inherited value) as a backstop. Never `--bare`
@@ -136,15 +140,18 @@
 //   child, so a Claude Code session that ends its turn no longer kills the run; signal the child pid to stop the run.
 //   --no-detach runs in process (the old behaviour). Windows never detaches. OpenCode agents detach only with --detach.
 // - Pace-aware routing (bin/pace-read.mjs): every launch reads `cc-pace.mjs status --json` once (10 s timeout; any
-//   failure reads as `unknown`, never fails the run; ORCH_NO_PACE=1 → `off`). On an `under` pace, `--role worker`
-//   becomes [cc-worker, <today's chain after the Nvidia drop rule>]; every other state, every other role, --agent /
-//   --fallback launches and any `ses_` `--session` launch (the session pins the backend) keep today's chain. A
-//   `--role worker --session <id>` whose id does not start with `ses_` is a Claude session: the chain becomes
-//   [cc-worker, <today's chain>] so the resume goes to cc-worker, in every pace state, without a pace decision.
+//   failure reads as `unknown`, never fails the run; ORCH_NO_PACE=1 → `off`). PACE_POLICY (pace-read.mjs) maps
+//   worker → cc-worker, worker-strong → cc-worker-strong, critic → cc-critic, senior → cc-senior. On an `under`
+//   pace, `--role <r>` for r in the table becomes [<r's cc agent>, <today's chain after the Nvidia drop rule>],
+//   except senior while Fable is over; scout and orchestrator, every other state, --agent / --fallback launches and
+//   any `--session` launch never pace-prepend. A `--role <r> --session <id>` (r in the table) whose id does not
+//   start with `ses_` is a Claude session: the chain becomes [<r's cc agent>, <today's chain>] so the resume goes
+//   to that cc agent, in every pace state, without a pace decision; a `ses_` id keeps today's chain.
 //   With --vision (or an image Mandate) cc-worker counts as vision-capable; a first hop that is not the agent
 //   `a` books (the vision filter dropped it) runs fresh on its own pinned model. Every receipt
-//   gets cc_pace {state, weekly, projected, at, prepended}. A detached child takes the launcher's read and chain
-//   (env ORCH_PACE_DECISION) and never reads again. ORCH_PACE_BIN overrides the cc-pace.mjs path (tests).
+//   gets cc_pace {state, weekly, projected, at, prepended, role, shadow} (role: the --role, null for --agent). A
+//   detached child takes the launcher's read and chain (env ORCH_PACE_DECISION) and never reads again.
+//   ORCH_PACE_BIN overrides the cc-pace.mjs path (tests).
 // Exit: 0 finished, 3 no final text, 4 timeout, 5 opencode error, 6 every pool in the chain known-down, 7 board
 // attach refused (--ticket), 8 model not allowed by provider policy (`ignored`; unreadable providers.json; model unresolvable while any provider is restricted; `free-only`
 // and not on the allowlist), 10 stale or dirty tree (fresh --stream worker refused before queued/spawn).
@@ -164,7 +171,7 @@ import crypto from "node:crypto";
 import { appendEvent, atomicWrite, streamsDir } from "./handoff.mjs";
 import { workerOutcome } from "./outcome.mjs";
 import { CHAINS, chainFor } from "./chains.mjs";
-import { readPace, paceChain, ccPaceRecord } from "./pace-read.mjs";
+import { readPace, paceChain, ccPaceRecord, PACE_POLICY } from "./pace-read.mjs";
 import { readSample, slotConfig, allowedSlots, decisionLog, heldCount, nvidiaCapNow, recordNvidia429 } from "./slots.mjs";
 import { allowedRoots, findMain, gitStatusZ, parseStatusZ, footer, mergeEditFence, foldEscapes, finalizeEscapes, hasCompletedWrite } from "./worktree-fence.mjs";
 
@@ -349,13 +356,14 @@ export function args(argv, opts = {}) {
     if (chain[0] === "worker-nvidia" && nvidiaDropCount(outDir) >= 2) chain = chain.slice(1);
     if (Array.isArray(opts.chain) && opts.chain.length) {
       chain = [...opts.chain]; // detached child: the launcher's decision, never a second pace read
-    } else if (a.role === "worker" && a.session && !a.session.startsWith("ses_")) {
-      // A non-`ses_` session is a Claude Code session (a cc-worker round): resume it on cc-worker (rule 5, same
+    } else if (Object.hasOwn(PACE_POLICY, a.role) && a.session && !a.session.startsWith("ses_")) {
+      // A non-`ses_` session is a Claude Code session (a cc-* round): resume it on the role's cc agent (rule 5, same
       // agent and session) whatever the pace; fallback hops start fresh OpenCode sessions. Not a pace decision.
-      chain = ["cc-worker", ...chain];
+      const cc = PACE_POLICY[a.role];
+      if (chain[0] !== cc) chain = [cc, ...chain];
     } else if (!a.session && opts.pace !== undefined) {
-      // Pace-aware routing (M4): an `under` pace puts cc-worker first for --role worker. --session pins the
-      // backend (a revision round stays on its agent and session), so it never prepends.
+      // Pace-aware routing (M4, v2 A4): an `under` pace puts the role's cc agent first (PACE_POLICY). --session pins
+      // the backend (a revision round stays on its agent and session), so it never prepends.
       const pace = typeof opts.pace === "function" ? opts.pace() : opts.pace;
       const next = paceChain(a.role, chain, pace);
       if (next.length > chain.length) {
@@ -540,6 +548,28 @@ export function ccReaderWaitMin() {
 }
 // A cc reader gave up waiting for its `ccread` slot: runChain skips to the next agent (no attempt used).
 export class CcSlotTimeout extends Error {}
+// A cc reader whose role contract is missing: runChain skips to the next agent (no attempt used), never contract-less.
+export class CcNoContract extends Error {}
+
+// The role contract of a cc reader (cc-pacing-v2 A4 r2): the installed Claude Code agent file of its role,
+// <ORCH_HOME or home>/.claude/agents/<agent without "cc-">.md (cc-critic → critic.md, cc-senior → senior.md; same home
+// rule as install.mjs homeDir). `claude -p` gets only the short pointer prompt, so without this the run has no critic or
+// senior contract (VERDICT first line, findings, BLAST RADIUS) and the verdict gate reads it INVALID.
+export function ccContractFile(agent) {
+  return path.join(process.env.ORCH_HOME || os.homedir(), ".claude", "agents", `${String(agent).replace(/^cc-/, "")}.md`);
+}
+/** The contract body (frontmatter stripped), or null when the file is missing, unreadable or has an empty body. */
+export function ccContract(agent) {
+  let text;
+  try {
+    text = fs.readFileSync(ccContractFile(agent), "utf8");
+  } catch {
+    return null;
+  }
+  const m = text.match(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/);
+  const body = (m ? text.slice(m[0].length) : text).trim();
+  return body ? body + "\n" : null;
+}
 
 function alive(pid) {
   try {
@@ -1273,7 +1303,7 @@ async function runChain(a) {
   let attempts = 0;
   let visionFallbackWarning = false;
   let liveModels; // `opencode models`, read once and only if some hop has a model to check
-  const notes = []; // receipt `notes`: chain events that are not errors of the run that answered (cc-slot-timeout)
+  const notes = []; // receipt `notes`: chain events that are not errors of the run that answered (cc-slot-timeout, cc-no-contract)
   for (let i = 0; i < chain.length && attempts < 3; i++) {
     const agent = chain[i];
     // The first hop reuses `a` (its --session, --model) only when it is the agent `a` books: after the vision
@@ -1305,7 +1335,7 @@ async function runChain(a) {
     try {
       r = await runWorker(first ? a : { ...a, agent, session: undefined, model: undefined });
     } catch (e) {
-      if (!(e instanceof CcSlotTimeout)) throw e;
+      if (!(e instanceof CcSlotTimeout) && !(e instanceof CcNoContract)) throw e;
       attempts--; // nothing was spawned; r keeps the previous hop's result, if any
       hops.push({ agent, model, skipped: true, reason: e.message });
       notes.push(e.message);
@@ -1344,7 +1374,7 @@ async function runChain(a) {
   }
   if (hops.length) r.repooled_from = hops;
   if (notes.length) r.notes = notes;
-  r.cc_pace = a.ccPace ?? ccPaceRecord(null); // the launch's one pace read (main block), on every receipt
+  r.cc_pace = a.ccPace ?? ccPaceRecord(null, false, a.role ?? null); // the launch's one pace read (main block), on every receipt
   if (visionFallbackWarning) r.vision_fallback = "no vision-capable agent available, using first healthy agent";
   // Record auto-vision detection info
   if (a.autoVision) {
@@ -1371,7 +1401,7 @@ function noPoolErrors(hops) {
     : absent.length === hops.length ? "absent from opencode models"
     : "absent from opencode models or known-down (pool-health)";
   const errors = [`every agent in the chain is ${why}`];
-  for (const h of hops) if (/^cc-slot-timeout/.test(h.reason || "")) errors.push(h.reason);
+  for (const h of hops) if (/^cc-(slot-timeout|no-contract)/.test(h.reason || "")) errors.push(h.reason);
   if (absent.length) errors.push(`absent from opencode models: ${absent.join(", ")}`);
   return errors;
 }
@@ -1402,6 +1432,10 @@ export async function runWorker(a) {
   const safe = (m) => (m.startsWith("-") ? "\n" + m : m);
 
   const promptText = fs.readFileSync(a.prompt, "utf8"); // before the slot: a bad --prompt must not leak a slot, registry entry or timer
+  // A cc reader runs with its role contract or not at all (before the slot: a skipped hop holds nothing).
+  const ccReader = isCc && isCcReader(a.agent);
+  const contract = ccReader ? ccContract(a.agent) : null;
+  if (ccReader && !contract) throw new CcNoContract(`cc-no-contract: ${ccContractFile(a.agent)}`);
   // Provider slot first: a run waiting for Nvidia holds no machine slot and has not started its clock.
   let providerSlot = null;
   let releaseMachine = null;
@@ -1543,14 +1577,23 @@ export async function runWorker(a) {
     fenceBefore = snap === null ? null : parseStatusZ(snap);
   }
   const fenceState = { paths: [], restored: [], left: [], suspected: [], notes: [], eventsByPath: new Map() };
-  const fenceFooter = footer(dir, out, fenceMain);
+  // A cc reader is told to read, not "create and edit files" (the OpenCode readers keep the shared footer).
+  const fenceFooter = ccReader ? `\nYour worktree is ${dir}. Read it; do not create or edit files in it.\n` : footer(dir, out, fenceMain);
+  // The cc reader's contract goes to `claude` as an appended system prompt file beside the run's out file.
+  let contractFile = null;
+  if (ccReader) {
+    contractFile = out + ".contract.md";
+    atomicWrite(contractFile, contract);
+  }
   const base = promptText + reportLine + FOOTER + readonlyFooter + visionFooter + fenceFooter;
   const cliFor = (session, message) => {
     if (isCc) {
       // The prompt comes right after -p: --tools and --allowedTools are variadic and would swallow a later positional.
       // --settings disableAllHooks: the owner's Stop hooks must not keep a finished run alive or dirty the worktree.
-      // Writers keep cc-worker's argv byte-for-byte; readers swap the tool/permission flags (ccToolArgs).
-      const cc = ["-p", safe(message), "--model", model, "--settings", CC_SETTINGS, ...ccToolArgs(a.agent), "--permission-prompts", "none", "--output-format", "stream-json", "--verbose"];
+      // Writers keep cc-worker's argv byte-for-byte; readers swap the tool/permission flags (ccToolArgs) and get their
+      // role contract with --append-system-prompt-file, placed before the variadic --tools so it cannot be swallowed.
+      const contractArgs = contractFile ? ["--append-system-prompt-file", contractFile] : [];
+      const cc = ["-p", safe(message), "--model", model, "--settings", CC_SETTINGS, ...contractArgs, ...ccToolArgs(a.agent), "--permission-prompts", "none", "--output-format", "stream-json", "--verbose"];
       if (session) cc.push("--resume", session);
       return cc;
     }
@@ -1892,7 +1935,7 @@ export async function runWorker(a) {
       // Worktree fence: only present when something escaped or was suspected.
       ...(escaped ? { escaped } : {}),
       // Claude Code weekly pace at launch (M4): read once per launch, never fails the run.
-      cc_pace: a.ccPace ?? ccPaceRecord(null),
+      cc_pace: a.ccPace ?? ccPaceRecord(null, false, a.role ?? null),
       // Critics: the mechanical decision, not the critic's own claim (free critics find, then approve).
       gate: gateResult,
       // Vision metadata
@@ -2078,7 +2121,7 @@ export function paceDecision(text) {
     const d = JSON.parse(text);
     if (!d || typeof d !== "object" || !d.cc_pace || typeof d.cc_pace !== "object") return null;
     const chain = Array.isArray(d.chain) && d.chain.every((x) => typeof x === "string") ? d.chain : null;
-    return { cc_pace: ccPaceRecord(d.cc_pace, d.cc_pace.prepended === true), chain, ...(d.fable_over === true ? { fable_over: true } : {}) };
+    return { cc_pace: ccPaceRecord(d.cc_pace, d.cc_pace.prepended === true, d.cc_pace.role), chain, ...(d.fable_over === true ? { fable_over: true } : {}) };
   } catch {
     return null;
   }
@@ -2157,7 +2200,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.error(`oc-worker: ${e.message}`);
     process.exit(2);
   }
-  a.ccPace = inherited ? inherited.cc_pace : ccPaceRecord(pace(), a.pacePrepended === true);
+  a.ccPace = inherited ? inherited.cc_pace : ccPaceRecord(pace(), a.pacePrepended === true, a.role ?? null);
   // cc-senior runs opus while fable is over pace: from the same single read (a detached child inherits it).
   a.fableOver = inherited ? inherited.fable_over === true : pace()?.fable?.state === "over";
   // Resolve the fixed/dynamic slot decision once at startup; a usage error exits 2.
