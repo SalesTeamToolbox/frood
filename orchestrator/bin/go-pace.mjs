@@ -110,8 +110,9 @@ function asConfig(cfg) {
   };
 }
 
-/** Monday 00:00:00.000 UTC on or before now, plus 7 days. */
+/** Monday 00:00:00.000 UTC on or before now, plus 7 days. Null for non-finite now. */
 export function weekBounds(now) {
+  if (!Number.isFinite(now)) return null;
   const d = new Date(now);
   const daysSinceMonday = (d.getUTCDay() + 6) % 7;
   const start = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - daysSinceMonday);
@@ -124,10 +125,10 @@ const daysInMonth = (y, m) => new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
  * The paid period containing now, stepping calendar months from the anchor. Each boundary uses the
  * anchor's day-of-month clamped to that month's last day and the anchor's UTC time of day (anchor
  * 2026-01-31T00:00Z gives boundaries Feb 28, Mar 31, Apr 30, ...). Steps backwards for now < anchor.
- * Returns null for a missing or unparsable anchor.
+ * Returns null for a missing or unparsable anchor, or a non-finite now.
  */
 export function periodBounds(anchor, now) {
-  if (typeof anchor !== "string") return null;
+  if (typeof anchor !== "string" || !Number.isFinite(now)) return null;
   const a = new Date(Date.parse(anchor));
   if (!Number.isFinite(a.getTime())) return null;
   const day = a.getUTCDate();
@@ -162,6 +163,7 @@ export function periodBounds(anchor, now) {
 
 /** The month before a snapshot's monthly reset: same day clamped to that month, same UTC time. */
 export function periodFromReset(resetMs) {
+  if (!Number.isFinite(resetMs)) return null;
   const r = new Date(resetMs);
   const py = r.getUTCMonth() === 0 ? r.getUTCFullYear() - 1 : r.getUTCFullYear();
   const pm = r.getUTCMonth() === 0 ? 11 : r.getUTCMonth() - 1;
@@ -182,6 +184,7 @@ export function periodFromReset(resetMs) {
  * previous window's end and lasts 5 h (times 10:00, 14:00, 15:30 give 10:00-15:00 and 15:30-20:30).
  */
 export function fiveHourWindow(times, now) {
+  if (!Number.isFinite(now)) return null;
   const sorted = (Array.isArray(times) ? times : []).filter(Number.isFinite).sort((a, b) => a - b);
   let prevEnd = -Infinity;
   for (const t of sorted) {
@@ -234,7 +237,7 @@ export function goPaceState({ cfg, ledger, snapshots = [], health = {}, now, pre
   const rows = ledger && typeof ledger === "object" && Array.isArray(ledger.rows) ? ledger.rows : [];
   const unrated = Number.isFinite(ledger?.unrated) ? ledger.unrated : 0;
   const mode = c.pace.mode;
-  const at = new Date(now).toISOString();
+  const at = Number.isFinite(now) ? new Date(now).toISOString() : null;
 
   const nullResets = { "5h": null, wk: null, mo: null };
   const blank = (state, reason, extra = {}) => ({
@@ -288,6 +291,7 @@ export function goPaceState({ cfg, ledger, snapshots = [], health = {}, now, pre
 
   // wk bounds: always the Monday week; a fresh weekly resets_at replaces the end only.
   const wk = weekBounds(now);
+  if (wk === null) return blank("unknown", "no period"); // non-finite now: no window resolves
   const snapWkReset = Number.isFinite(Date.parse(fresh?.weekly?.resets_at)) ? Date.parse(fresh.weekly.resets_at) : NaN;
   if (Number.isFinite(snapWkReset) && snapWkReset > now) wk.end = snapWkReset;
 
@@ -407,11 +411,16 @@ export function statusLine(r) {
   if (r.state === "off") s = `go pace: OFF (${r.reason})`;
   else if (r.state === "unknown") s = `go pace: UNKNOWN (${r.reason})`;
   else if (r.reason !== "projected" || r.bind == null || !Number.isFinite(r.proj)) {
-    s = `go pace${r.mode === "shadow" ? " (shadow)" : ""}: ${String(r.state).toUpperCase()} (${r.reason})`;
+    const parts = [];
+    if (Number.isFinite(r.p_wk)) parts.push(`wk ${Math.round(r.p_wk)}%`);
+    if (Number.isFinite(r.p_5h)) parts.push(`5h ${Math.round(r.p_5h)}%`);
+    if (r.src != null) parts.push(`src ${r.src}`);
+    const mid = parts.length ? ` ${parts.join(" ")}` : "";
+    s = `go pace${r.mode === "shadow" ? " (shadow)" : ""}: ${String(r.state).toUpperCase()}${mid} (${r.reason})`;
   } else {
     const pBind = r.bind === "mo" ? r.p_mo : r.p_wk;
     const d = Number.isFinite(Date.parse(r.resets?.[r.bind])) ? new Date(Date.parse(r.resets[r.bind])) : null;
-    const on = d ? `${MONTHS[d.getUTCMonth()]}${d.getUTCDate()}` : "?";
+    const on = d ? `${MONTHS[d.getUTCMonth()]}${String(d.getUTCDate()).padStart(2, "0")}` : "?";
     s = `go pace${r.mode === "shadow" ? " (shadow)" : ""}: ${String(r.state).toUpperCase()} ${r.bind} ${Math.round(pBind)}%→${Math.round(r.proj)}% bind ${r.bind} @${on} wk ${Math.round(r.p_wk)}% 5h ${Math.round(r.p_5h)}% src ${r.src}`;
   }
   return s.slice(0, 100);

@@ -330,6 +330,17 @@ test("bar 8: quota mark after both resets counts; stale/expired/model-scoped do 
   const other = st({ ...low, health: mark(NOW_W - HOUR, NOW_W + 24 * HOUR, "opencode-go/*", "error") });
   assert.notEqual(other.reason, "go quota mark");
   assert.equal(other.state, "under");
+  // A provider mark set between wk.start and mo.start is stale: mo.start (mid-week) is the later reset.
+  const midC = cfg({ period_anchor: "2026-11-01T00:00:00.000Z" }); // Dec 1 - Jan 1 period; wk Nov 30 - Dec 7
+  const between = goPaceState({
+    cfg: midC,
+    now: NOW_W,
+    ledger: { rows: [], unrated: 0 },
+    snapshots: [],
+    health: mark(Date.parse("2026-11-30T12:00:00.000Z"), NOW_W + 24 * HOUR),
+  });
+  assert.notEqual(between.reason, "go quota mark");
+  assert.equal(between.state, "under");
 });
 
 test("bar 9: unknown reasons; allowance mismatch; pct 0 never mismatches", () => {
@@ -382,6 +393,18 @@ test("bar 9: unknown reasons; allowance mismatch; pct 0 never mismatches", () =>
     ledger: { rows: [{ t: NOW_W - HOUR, usd: 10 }], unrated: 0 },
   });
   assert.notEqual(zero.state, "unknown");
+
+  // mo-meter mismatch while the wk window passes: spend sits before wk.start but inside the period.
+  const moMismatch = st({
+    snapshots: [snap({})],
+    ledger: { rows: [{ t: Date.parse("2026-11-25T00:00:00.000Z"), usd: 7 }], unrated: 0 },
+  });
+  assert.equal(moMismatch.state, "unknown");
+  assert.equal(moMismatch.reason, "allowance mismatch");
+
+  // Non-finite now resolves no window.
+  const nanNow = st({ now: NaN });
+  assert.equal(nanNow.state, "unknown");
 });
 
 test("bar 10: early period (elapsed < 24 h) -> on", () => {
@@ -490,6 +513,12 @@ test("bar 12: window helpers", () => {
   assert.equal(sumUsd(rows, 100, 300), 1);
   assert.equal(sumUsd(rows, 0, 1000), 3);
   assert.equal(sumUsd([], 0, 1000), 0);
+
+  // Non-finite now resolves no window.
+  assert.equal(periodBounds(ANCHOR, NaN), null);
+  assert.equal(weekBounds(NaN), null);
+  assert.equal(fiveHourWindow([t10], NaN), null);
+  assert.equal(periodFromReset(NaN), null);
 });
 
 test("bar 13: goTail role x state x mode x leading-cc x throwing agentModel", () => {
@@ -604,20 +633,39 @@ test("bar 14: statusLine for off, unknown, shadow under, on-mode over (non-proje
   lines.push(statusLine({ state: "off", reason: "disabled", mode: "shadow" }));
   lines.push(statusLine({ state: "unknown", reason: "no ledger", mode: "shadow" }));
   lines.push(statusLine(worked()));
-  const onQuota = goPaceState({
+  // Minimal object: no window parts, only the reason.
+  lines.push(statusLine({ state: "over", reason: "go quota mark", mode: "on" }));
+  // Real burst result in on mode carries the window parts before the reason.
+  const burstLine = goPaceState({
     cfg: cfg({ pace: { mode: "on" } }),
     now: NOW_W,
-    ledger: { rows: [], unrated: 0 },
-    snapshots: [snap({})],
-    health: { "opencode-go/*": { reason: "quota", since: iso(NOW_W - HOUR), until: iso(NOW_W + HOUR) } },
+    ledger: {
+      rows: [
+        { t: NOW_W - HOUR, usd: 10.8 },
+        { t: Date.parse("2026-11-30T01:00:00.000Z"), usd: 1.2 },
+      ],
+      unrated: 0,
+    },
+    snapshots: [],
+    health: {},
   });
-  assert.equal(onQuota.mode, "on");
-  lines.push(statusLine(onQuota));
+  assert.equal(burstLine.state, "over");
+  assert.equal(burstLine.reason, "5h burst");
+  lines.push(statusLine(burstLine));
+  // Single-digit day of month is zero-padded.
+  lines.push(
+    statusLine({
+      ...worked(),
+      resets: { ...worked().resets, mo: iso(Date.parse("2026-12-03T00:00:00.000Z")) },
+    }),
+  );
   // A 200-char reason is cut, never wrapped.
   lines.push(statusLine({ state: "unknown", reason: "x".repeat(200), mode: "shadow" }));
   assert.equal(lines[0], "go pace: OFF (disabled)");
   assert.equal(lines[1], "go pace: UNKNOWN (no ledger)");
   assert.equal(lines[3], "go pace: OVER (go quota mark)");
+  assert.equal(lines[4], "go pace: OVER wk 40% 5h 90% src ledger (5h burst)");
+  assert.ok(lines[5].includes("@Dec03"), lines[5]);
   assert.ok(lines[2].startsWith("go pace (shadow): UNDER"), lines[2]);
   for (const l of lines) {
     assert.ok(!l.includes("\n"), l);
