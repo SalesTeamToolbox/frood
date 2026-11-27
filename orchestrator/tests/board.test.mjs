@@ -1126,6 +1126,55 @@ test("phase 2 case 11: the 4th counted round blocks rounds_exhausted and records
   assert.match(after.stderr, /round needs stage working, ticket is blocked/);
 });
 
+test("round: INVALID findings (no BLAST RADIUS) are refused before the cap; ticket unchanged", () => {
+  const c = mk();
+  workingTicket(c, "p2-invalid");
+  const sha = landBlastFile(c);
+  const invalid = fixtureText(c, "findings-invalid.md", "VERDICT: APPROVED\nTESTS: not run\n");
+
+  const before = bytes(ticketFile(c, "p2-invalid"));
+  const r = round(c, "p2-invalid", { findings: invalid, reviewed: sha });
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /no BLAST RADIUS entries/);
+  assert.match(r.stderr, /save the critic's reply verbatim/);
+  assert.match(r.stderr, /re-run the critic/);
+  const after = JSON.parse(bytes(ticketFile(c, "p2-invalid")));
+  assert.deepEqual(after.rounds, [], "no round recorded");
+  assert.equal(after.stage, "working", "ticket stays working, never blocked by INVALID paperwork");
+  assert.deepEqual(after.signoffs, [], "no signoffs");
+  assert.ok(Buffer.compare(before, bytes(ticketFile(c, "p2-invalid"))) === 0, "nothing written");
+});
+
+test("round: valid findings still record a counted round", () => {
+  const c = mk();
+  workingTicket(c, "p2-valid-findings");
+  const sha = landBlastFile(c);
+  const r = round(c, "p2-valid-findings", { reviewed: sha });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.ticket.rounds.length, 1);
+  assert.equal(r.ticket.rounds[0].counted, true);
+  assert.equal(r.ticket.rounds[0].critic.effective, "APPROVED");
+});
+
+test("round: three INVALID attempts in a row never reach rounds_exhausted", () => {
+  const c = mk();
+  workingTicket(c, "p2-invalid-cap");
+  const sha = landBlastFile(c);
+  const invalid = fixtureText(c, "findings-invalid.md", "VERDICT: APPROVED\nTESTS: not run\n");
+  for (let i = 1; i <= 3; i++) {
+    const r = round(c, "p2-invalid-cap", { findings: invalid, reviewed: sha });
+    assert.equal(r.status, 1, `attempt ${i}: ${r.stderr}`);
+    assert.match(r.stderr, /no BLAST RADIUS entries/);
+  }
+  const t = JSON.parse(bytes(ticketFile(c, "p2-invalid-cap")));
+  assert.deepEqual(t.rounds, [], "three INVALID attempts recorded nothing");
+  assert.equal(t.stage, "working", "not blocked by INVALID paperwork");
+  // A 4th INVALID attempt is still refused, never rounds_exhausted.
+  const fourth = round(c, "p2-invalid-cap", { findings: invalid, reviewed: sha });
+  assert.equal(fourth.status, 1, fourth.stderr);
+  assert.equal(JSON.parse(bytes(ticketFile(c, "p2-invalid-cap"))).rounds.length, 0);
+});
+
 test("phase 2 case 12: a worker question blocks the ticket without recording a round", () => {
   const c = mk();
   workingTicket(c, "p2-question");

@@ -1109,6 +1109,14 @@ function cmdRound(ctx, id) {
     const counted = t.rounds.filter((r) => r.counted && r.n > floor).length;
 
     if (done) {
+      // An INVALID findings file is paperwork, not a review. Refuse it before the round cap so it never burns a
+      // counted round and never blocks the ticket: save the critic's reply verbatim to the findings file and
+      // re-run `round`; if the critic's own reply lacks the section, re-run the critic.
+      if (critic.effective === "INVALID") {
+        throw new Refuse(
+          `findings gate INVALID — ${critic.reasons.join("; ")} — save the critic's reply verbatim to the findings file and re-run round; if the critic's own reply lacks the section, re-run the critic`,
+        );
+      }
       if (counted >= ROUND_CAP) {
         // A listed transition (working -> blocked), so this succeeds and prints the blocked ticket. The round is
         // not recorded: the 4th review is exactly the evidence the cap exists to stop.
