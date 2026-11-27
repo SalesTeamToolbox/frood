@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { driveOnce, handleEvent } from "../bin/desk.mjs";
+import { driveOnce, handleEvent, sweepOrphans } from "../bin/desk.mjs";
 import { appendAck, appendEvent, orchRoot, readAckLines, readEvents, unhandled } from "../bin/handoff.mjs";
 import { processStart } from "../bin/proc-tree.mjs";
 
@@ -659,4 +659,290 @@ test("driveOnce (dry or stubbed): a critic whose run already has a verdict pages
       else process.env[k] = saved[k];
     }
   }
+});
+
+// ---------------------------------------------------------------- nested escalations (desk-nested-escalations)
+
+import { createRequire as _createRequire } from "node:module";
+const _require = _createRequire(import.meta.url);
+
+// Full-schema mailbox fixture (like desk.test.mjs mkMailbox): desk.mjs inserts a complete row.
+function mkMailbox(h) {
+  const file = path.join(h, ".local", "share", "opencode-peer-mail", "mailbox.db");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const { DatabaseSync } = _require("node:sqlite");
+  const db = new DatabaseSync(file);
+  try {
+    db.exec(`CREATE TABLE messages (
+      id TEXT PRIMARY KEY, ts INTEGER NOT NULL, from_session TEXT NOT NULL,
+      from_title TEXT NOT NULL DEFAULT '', from_branch TEXT NOT NULL DEFAULT '', to_session TEXT NOT NULL,
+      subject TEXT NOT NULL, body TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'unread' CHECK (status IN ('unread','read','acked')),
+      expires_at INTEGER NOT NULL);`);
+    db.exec(`CREATE TABLE peers (
+      session_id TEXT PRIMARY KEY, harness TEXT NOT NULL DEFAULT 'claude', title TEXT NOT NULL DEFAULT '',
+      directory TEXT NOT NULL DEFAULT '', branch TEXT NOT NULL DEFAULT '',
+      first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL);`);
+  } finally {
+    db.close();
+  }
+  return file;
+}
+const mkPeers2 = (h, rows) => {
+  const file = path.join(h, ".local", "share", "opencode-peer-mail", "mailbox.db");
+  const { DatabaseSync } = _require("node:sqlite");
+  const db = new DatabaseSync(file);
+  try {
+    for (const [id, agoMin] of Object.entries(rows))
+      db.prepare("INSERT INTO peers (session_id, harness, title, directory, branch, first_seen, last_seen) VALUES (?, 'claude', '', '', '', ?, ?)").run(id, Date.now(), Date.now() - agoMin * 60_000);
+  } finally {
+    db.close();
+  }
+};
+const mailTo = (file, to) => {
+  if (!fs.existsSync(file)) return [];
+  const { DatabaseSync } = _require("node:sqlite");
+  const db = new DatabaseSync(file, { readOnly: true });
+  try {
+    return db.prepare("SELECT subject, body FROM messages WHERE to_session = ? ORDER BY ts, id").all(to);
+  } finally {
+    db.close();
+  }
+};
+const allMail = (file) => {
+  if (!fs.existsSync(file)) return [];
+  const { DatabaseSync } = _require("node:sqlite");
+  const db = new DatabaseSync(file, { readOnly: true });
+  try {
+    return db.prepare("SELECT to_session, subject FROM messages ORDER BY ts, id").all();
+  } finally {
+    db.close();
+  }
+};
+// A stream held by a nested child session with a live parent: the child is long silent, the parent was just seen.
+function nestedHeld(h, name = "m6a", { childAgo = 200, parentAgo = 2, parent = "ses_parent" } = {}) {
+  mkStream(h, name);
+  mkMailbox(h);
+  const sp = path.join(sdir(h), `${name}.json`);
+  const old = isoAgo(childAgo);
+  fs.writeFileSync(sp, JSON.stringify({ ...JSON.parse(fs.readFileSync(sp, "utf8")), held_by: "cc", held_session: "ses_child", held_at: old, held_parent: parent, written_at: old }));
+  mkPeers2(h, { "ses_child": childAgo, [parent]: parentAgo });
+}
+const isoAgo = (min) => new Date(Date.now() - min * 60_000).toISOString();
+const openEsc = (h, name, key = "run:t1/worker-r1:done", reason = "senior /f") =>
+  inHome(h, () => appendAck(name, key, `ESCALATE ${reason}`));
+
+test("nested: an escalation mails both the holder and its parent, with the resolve line", async () => {
+  const h = home();
+  mkStream(h);
+  const sp = path.join(sdir(h), "m6a.json");
+  fs.writeFileSync(sp, JSON.stringify({ ...JSON.parse(fs.readFileSync(sp, "utf8")), held_by: "cc", held_session: "ses_child", held_at: at(), held_parent: "ses_parent" }));
+  const mailbox = mkMailbox(h);
+  mkPeers2(h, { "ses_child": 200, "ses_parent": 2 });
+  mkTicket(h);
+  const out = path.join(h, "reports", "t1", "worker-r1.md");
+  fs.writeFileSync(out, "blocked\n");
+  inHome(h, () => {
+    appendEvent("m6a", evQ("t1/worker-r1", out, path.join(h, "reports", "t1", "ticket.json")));
+    appendEvent("m6a", evDone("t1/worker-r1", out, "worker", { outcome: "blocked_question" }));
+  });
+  const saved = { ...process.env };
+  Object.assign(process.env, { ORCH_NO_NOTIFY: "1" });
+  try {
+    const r = await inHome(h, () => driveOnce({ lastPoll: null, printed: new Set() }, {}));
+    assert.equal(r.length, 1);
+    assert.equal(r[0].outcome, "paged");
+    const child = mailTo(mailbox, "ses_child");
+    assert.equal(child.length, 1, "the holder is mailed as today");
+    assert.match(child[0].subject, /^desk: /);
+    assert.doesNotMatch(child[0].subject, /nested/);
+    const parent = mailTo(mailbox, "ses_parent");
+    assert.equal(parent.length, 1, "the nested parent is mailed alongside");
+    assert.match(parent[0].subject, /^desk: \[nested m6a\] /);
+    for (const m of [...child, ...parent]) {
+      assert.match(m.body, /Stream: m6a/);
+      assert.match(m.body, /Event: run:t1\/worker-r1:done/);
+      assert.match(m.body, /After you handle it: node .* resolve m6a run:t1\/worker-r1:done --note/);
+    }
+  } finally {
+    for (const k of ["ORCH_NO_NOTIFY"]) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+});
+
+test("nested: an idle holder with a live parent mails the parent once and never orphan-pages", () => {
+  const h = home();
+  nestedHeld(h);
+  const mailbox = path.join(h, ".local", "share", "opencode-peer-mail", "mailbox.db");
+  const saved = { ...process.env };
+  Object.assign(process.env, { ORCH_NO_NOTIFY: "1" });
+  try {
+    openEsc(h, "m6a");
+    assert.deepEqual(inHome(h, () => sweepOrphans()), ["m6a"]);
+    const state = daemonState(h);
+    assert.ok(state.orphaned.some((id) => id.startsWith("parent:m6a:")), "a parent: entry records the wake-up");
+    assert.ok(!state.orphaned.some((id) => id.startsWith("orphan:")), "no owner page: no orphan: entry");
+    const parent = mailTo(mailbox, "ses_parent");
+    assert.equal(parent.length, 1);
+    assert.match(parent[0].subject, /child session idle with 1 open escalation\(s\)/);
+    assert.match(parent[0].body, /run:t1\/worker-r1:done: node .* resolve m6a run:t1\/worker-r1:done --note/);
+    assert.deepEqual(mailTo(mailbox, "ses_child"), [], "the sweep mails nobody else");
+    assert.deepEqual(inHome(h, () => sweepOrphans()), [], "second poll: already woken");
+    assert.equal(mailTo(mailbox, "ses_parent").length, 1, "exactly once per claim");
+  } finally {
+    for (const k of ["ORCH_NO_NOTIFY"]) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+});
+
+test("nested: an idle holder with no parent still orphan-pages; a live holder stays quiet", () => {
+  const h = home();
+  mkStream(h);
+  mkMailbox(h);
+  const sp = path.join(sdir(h), "m6a.json");
+  const old = isoAgo(200);
+  fs.writeFileSync(sp, JSON.stringify({ ...JSON.parse(fs.readFileSync(sp, "utf8")), held_by: "cc", held_session: "ses_child", held_at: old, written_at: old }));
+  mkPeers2(h, { "ses_child": 200 });
+  const saved = { ...process.env };
+  Object.assign(process.env, { ORCH_NO_NOTIFY: "1" });
+  try {
+    openEsc(h, "m6a");
+    assert.deepEqual(inHome(h, () => sweepOrphans()), ["m6a"]);
+    assert.ok(daemonState(h).orphaned.some((id) => id.startsWith("orphan:m6a:")), "the owner is paged as today");
+  } finally {
+    for (const k of ["ORCH_NO_NOTIFY"]) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+});
+
+test("nested: a live-pid parent idle 3 h gets the parent mail and no orphan page", () => {
+  const h = home();
+  nestedHeld(h, "m6a", { parent: "local_awake3" });
+  const mailbox = path.join(h, ".local", "share", "opencode-peer-mail", "mailbox.db");
+  const dir = path.join(h, ".claude", "sessions");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${process.pid}.json`), JSON.stringify({ hostSessionId: "local_awake3", sessionId: "ses_awake3", status: "idle", statusUpdatedAt: Date.now() - 180 * 60_000 }));
+  const saved = { ...process.env };
+  Object.assign(process.env, { ORCH_NO_NOTIFY: "1" });
+  try {
+    openEsc(h, "m6a");
+    assert.deepEqual(inHome(h, () => sweepOrphans()), ["m6a"]);
+    const state = daemonState(h);
+    assert.ok(state.orphaned.some((id) => id.startsWith("parent:m6a:")), "the parent is woken");
+    assert.ok(!state.orphaned.some((id) => id.startsWith("orphan:")), "no owner page");
+    const parent = mailTo(mailbox, "ses_awake3");
+    assert.equal(parent.length, 1, "the live parent is mailed");
+    assert.match(parent[0].subject, /\[nested m6a\]/);
+  } finally {
+    for (const k of ["ORCH_NO_NOTIFY"]) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+});
+
+test("nested: a parent idle 25 h (past the wake window) does not suppress the orphan page", () => {
+  const h = home();
+  const mailbox = path.join(h, ".local", "share", "opencode-peer-mail", "mailbox.db");
+  const dir = path.join(h, ".claude", "sessions");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${process.pid}.json`), JSON.stringify({ hostSessionId: "local_sleepy", sessionId: "ses_sleepy", status: "idle", statusUpdatedAt: Date.now() - 25 * 60 * 60_000 }));
+  nestedHeld(h, "m6a", { parent: "local_sleepy", parentAgo: 2 });
+  // no peer row for ses_sleepy: its only sign of life is the old session file
+  const saved = { ...process.env };
+  Object.assign(process.env, { ORCH_NO_NOTIFY: "1" });
+  try {
+    openEsc(h, "m6a");
+    assert.deepEqual(inHome(h, () => sweepOrphans()), ["m6a"]);
+    const state = daemonState(h);
+    assert.ok(state.orphaned.some((id) => id.startsWith("orphan:m6a:")), "the owner is paged");
+    assert.ok(!state.orphaned.some((id) => id.startsWith("parent:")), "no parent entry");
+    assert.deepEqual(allMail(mailbox), [], "nobody is mailed");
+  } finally {
+    for (const k of ["ORCH_NO_NOTIFY"]) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+});
+
+test("nested: a failed parent send falls through to the orphan page and writes no parent: entry", () => {
+  const h = home();
+  nestedHeld(h, "m6a", { parent: "ghost-parent" });
+  // no mailbox at all: every send fails — but the parent still reads as live via its session file
+  fs.rmSync(path.join(h, ".local", "share", "opencode-peer-mail", "mailbox.db"));
+  const sessDir = path.join(h, ".claude", "sessions");
+  fs.mkdirSync(sessDir, { recursive: true });
+  fs.writeFileSync(path.join(sessDir, `${process.pid}.json`), JSON.stringify({ sessionId: "ghost-parent", status: "idle", statusUpdatedAt: Date.now() }));
+  const saved = { ...process.env };
+  Object.assign(process.env, { ORCH_NO_NOTIFY: "1" });
+  const errs = [];
+  const origErr = console.error;
+  console.error = (...a) => errs.push(a.join(" "));
+  try {
+    openEsc(h, "m6a");
+    assert.deepEqual(inHome(h, () => sweepOrphans()), ["m6a"]);
+    const state = daemonState(h);
+    assert.ok(state.orphaned.some((id) => id.startsWith("orphan:m6a:")), "the owner is paged");
+    assert.ok(!state.orphaned.some((id) => id.startsWith("parent:")), "a failed send writes no parent: entry");
+    assert.ok(errs.some((e) => /cannot send peer-mail to ghost-parent/.test(e)));
+  } finally {
+    console.error = origErr;
+    for (const k of ["ORCH_NO_NOTIFY"]) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+});
+
+test("nested: a dry run sends nothing and writes no ledger across two polls", () => {
+  const h = home();
+  nestedHeld(h);
+  const mailbox = path.join(h, ".local", "share", "opencode-peer-mail", "mailbox.db");
+  const saved = { ...process.env };
+  Object.assign(process.env, { ORCH_NO_NOTIFY: "1", ORCH_DAEMON_DRY_RUN: "1" });
+  const logs = [];
+  const origLog = console.log;
+  console.log = (...a) => logs.push(a.join(" "));
+  try {
+    openEsc(h, "m6a");
+    assert.deepEqual(inHome(h, () => sweepOrphans()), [], "dry run never pages");
+    assert.deepEqual(inHome(h, () => sweepOrphans()), [], "nor on the second poll");
+    assert.ok(!fs.existsSync(path.join(h, ".config", "orchestrator", "desk-daemon", "state.json")), "no ledger write");
+    assert.deepEqual(allMail(mailbox), [], "no mail");
+    assert.equal(logs.filter((l) => /DRY would wake parent of m6a/.test(l)).length, 1, "one dry line per process");
+  } finally {
+    console.log = origLog;
+    for (const k of ["ORCH_NO_NOTIFY", "ORCH_DAEMON_DRY_RUN"]) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+});
+
+test("pendingEscalations drops a closed/shipped board ticket's escalation", () => {
+  const h = home();
+  mkStream(h);
+  const boardRepo = path.join(h, "boardrepo");
+  fs.mkdirSync(path.join(boardRepo, ".opencode", "board", "tickets"), { recursive: true });
+  fs.writeFileSync(path.join(boardRepo, ".opencode", "board", "tickets", "t1.json"), JSON.stringify({ id: "t1", stage: "shipped" }));
+  const sp = path.join(sdir(h), "m6a.json");
+  fs.writeFileSync(sp, JSON.stringify({ ...JSON.parse(fs.readFileSync(sp, "utf8")), repo: boardRepo }));
+  const ddir = path.join(h, ".config", "orchestrator", "desk-daemon");
+  fs.mkdirSync(ddir, { recursive: true });
+  fs.writeFileSync(path.join(ddir, "escalations.jsonl"), JSON.stringify({ at: at(), stream: "m6a", key: "run:t1/worker-r1:done", reason: "senior /f" }) + "\n");
+  const r = cli(h, ["daemon", "status"], { ORCH_NO_NOTIFY: "1" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /escalations pending: 0/);
+  // an open ticket's row still shows
+  fs.writeFileSync(path.join(ddir, "escalations.jsonl"), JSON.stringify({ at: at(), stream: "m6a", key: "run:t9/worker-r1:done", reason: "blocked /x" }) + "\n");
+  const r2 = cli(h, ["daemon", "status"], { ORCH_NO_NOTIFY: "1" });
+  assert.match(r2.stdout, /escalations pending: 1/);
+  assert.match(r2.stdout, /run:t9\/worker-r1:done blocked/);
 });

@@ -36,3 +36,5 @@ BLAST RADIUS:
 ```
 
 APPROVED means no blocker remains. Do not nitpick style the repo does not enforce. Do not edit files, commit, or change the worktree.
+
+An escalation you handled is closed with `desk.mjs resolve <stream> <key> --note …` — `peer_ack` on the desk mail alone does not close it.

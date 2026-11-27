@@ -540,3 +540,108 @@ test("ticketResolved: closed/shipped true, open false, missing ticket false", ()
     assert.equal(ticketResolved("verdict:nope/worker-r1:done", h), false);
   });
 });
+
+test("resolvePeerSession: a plain id passes through; empty is null", async () => {
+  const { resolvePeerSession } = await import("../bin/orphan.mjs");
+  assert.equal(resolvePeerSession("ses_plain123"), "ses_plain123");
+  assert.equal(resolvePeerSession(""), null);
+  assert.equal(resolvePeerSession(null), null);
+});
+
+test("resolvePeerSession: a local_ id maps via the sessions dir; non-json siblings are skipped", async () => {
+  const { resolvePeerSession } = await import("../bin/orphan.mjs");
+  const h = mkdtemp();
+  const dir = path.join(h, ".claude", "sessions");
+  fs.mkdirSync(dir, { recursive: true });
+  // a .key sibling with a matching hostSessionId must not match
+  fs.writeFileSync(path.join(dir, "7.key"), JSON.stringify({ hostSessionId: "local_h1", sessionId: "ses_wrong" }));
+  // a live pid (this process) holding the host id, older updated
+  const mine = process.pid;
+  fs.writeFileSync(path.join(dir, `${mine}.json`), JSON.stringify({ hostSessionId: "local_h1", sessionId: "ses_live", status: "idle", statusUpdatedAt: Date.now() - 50 * MIN }));
+  // a surely-dead pid with the same host id but a newer updated: liveness beats recency
+  const dead = 2147483647;
+  try {
+    process.kill(dead, 0);
+  } catch (e) {
+    assert.notEqual(e.code, undefined, "probing a dead pid throws");
+  }
+  fs.writeFileSync(path.join(dir, `${dead}.json`), JSON.stringify({ hostSessionId: "local_h1", sessionId: "ses_dead", status: "idle", statusUpdatedAt: Date.now() - MIN }));
+  assert.equal(resolvePeerSession("local_h1", h), "ses_live", "a live pid wins over a newer dead one");
+  fs.rmSync(path.join(dir, `${mine}.json`));
+  assert.equal(resolvePeerSession("local_h1", h), "ses_dead", "without a live pid the newest updated wins");
+  assert.equal(resolvePeerSession("local_nobody", h), null, "unmapped local_ is null");
+});
+
+test("parentSession: null with no held_parent; live via recent peer presence; not live when idle past the threshold", async () => {
+  const { parentSession } = await import("../bin/orphan.mjs");
+  const h = mkdtemp();
+  mkPeers(h, { "parent-live": 5, "parent-old": 120 });
+  mkStream(h, "bare", { ageMin: 200, held_by: "cc", held_session: "child1", held_at: iso(200) });
+  mkStream(h, "live", { ageMin: 200, held_by: "cc", held_session: "child1", held_at: iso(200), held_parent: "parent-live" });
+  mkStream(h, "stale", { ageMin: 200, held_by: "cc", held_session: "child1", held_at: iso(200), held_parent: "parent-old" });
+  mkStream(h, "ghost", { ageMin: 200, held_by: "cc", held_session: "child1", held_at: iso(200), held_parent: "local_nobody" });
+  withHome(h, {}, () => {
+    escalate("bare");
+    escalate("live");
+    escalate("stale");
+    escalate("ghost");
+    assert.equal(parentSession("bare"), null, "no held_parent");
+    const p = parentSession("live");
+    assert.equal(p.id, "parent-live");
+    assert.equal(p.live, true);
+    assert.ok(p.idleMs >= 0 && p.idleMs < orphanThresholdMs());
+    assert.equal(parentSession("stale").live, false, "a parent idle past the threshold is not live");
+    assert.equal(parentSession("ghost"), null, "an unmapped local_ parent is null");
+  });
+});
+
+test("parentSession: a live pid is live inside the wake window (3 h), not past it (25 h)", async () => {
+  const { parentSession } = await import("../bin/orphan.mjs");
+  const h = mkdtemp();
+  const dir = path.join(h, ".claude", "sessions");
+  fs.mkdirSync(dir, { recursive: true });
+  // a live pid (this process): idle 3 h first, then idle 25 h
+  fs.writeFileSync(path.join(dir, `${process.pid}.json`), JSON.stringify({ hostSessionId: "local_awake", sessionId: "parent-awake", status: "idle", statusUpdatedAt: Date.now() - 180 * MIN }));
+  mkStream(h, "w3", { ageMin: 300, held_by: "cc", held_session: "child1", held_at: iso(300), held_parent: "local_awake" });
+  withHome(h, {}, () => {
+    escalate("w3");
+    const p = parentSession("w3");
+    assert.equal(p.id, "parent-awake");
+    assert.equal(p.live, true, "a live-pid parent idle 3 h is inside the 24 h wake window");
+    assert.ok(p.idleMs > 170 * MIN && p.idleMs < 190 * MIN);
+  });
+  fs.writeFileSync(path.join(dir, `${process.pid}.json`), JSON.stringify({ hostSessionId: "local_awake", sessionId: "parent-awake", status: "idle", statusUpdatedAt: Date.now() - 25 * 60 * MIN }));
+  withHome(h, {}, () => {
+    const p = parentSession("w3");
+    assert.equal(p.id, "parent-awake");
+    assert.equal(p.live, false, "a live-pid parent idle 25 h is past the wake window");
+  });
+});
+
+test("parentSession: a dead-pid or transcript-only parent idle 3 h keeps the orphan bound (not live)", async () => {
+  const { parentSession } = await import("../bin/orphan.mjs");
+  const h = mkdtemp();
+  const dir = path.join(h, ".claude", "sessions");
+  fs.mkdirSync(dir, { recursive: true });
+  // dead pid holding the host id, updated 3 h ago; peer presence equally old so idleness is known
+  const dead = 2147483647;
+  fs.writeFileSync(path.join(dir, `${dead}.json`), JSON.stringify({ hostSessionId: "local_gone", sessionId: "parent-gone", status: "idle", statusUpdatedAt: Date.now() - 180 * MIN }));
+  mkStream(h, "d3", { ageMin: 300, held_by: "cc", held_session: "child1", held_at: iso(300), held_parent: "local_gone" });
+  mkPeers(h, { "parent-gone": 180 });
+  // transcript-only parent: no session file at all, transcript mtime 3 h ago
+  const repo = path.join(h, "wt");
+  fs.mkdirSync(repo, { recursive: true });
+  const tdir = path.join(h, ".claude", "projects", "wt");
+  fs.mkdirSync(tdir, { recursive: true });
+  const tfile = path.join(tdir, "parent-tx.jsonl");
+  fs.writeFileSync(tfile, '{"sessionId":"parent-tx"}\n');
+  const threeH = Date.now() - 180 * MIN;
+  fs.utimesSync(tfile, new Date(threeH), new Date(threeH));
+  mkStream(h, "t3", { ageMin: 300, repo, held_by: "cc", held_session: "child1", held_at: iso(300), held_parent: "parent-tx" });
+  withHome(h, {}, () => {
+    escalate("d3");
+    escalate("t3");
+    assert.equal(parentSession("d3").live, false, "dead-pid parent idle 3 h exceeds the 60 min orphan bound");
+    assert.equal(parentSession("t3").live, false, "transcript-only parent idle 3 h exceeds the 60 min orphan bound");
+  });
+});

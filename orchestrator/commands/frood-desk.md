@@ -141,7 +141,10 @@ After each handled event, record where the stream stands:
 An `ESCALATE` also needs its ack resolved once it is dealt with, so a later `step` reports `DONE` instead of
 re-printing it:
 
-`node {{ORCH_REPO}}/bin/handoff.mjs ack --stream <stream> --key <key> --resolved`
+`node {{ORCH_REPO}}/bin/desk.mjs resolve <stream> <key> --note "<what you did>"`
+
+(the low-level equivalent is `node {{ORCH_REPO}}/bin/handoff.mjs ack --stream <stream> --key <key> --resolved`;
+either way, `peer_ack` on the desk mail alone does not close it)
 
 **Spinner (interactive desk sessions only — the daemon has no UI):** mirror runs to
 todos (Claude Code: `TodoWrite`, OpenCode: `todowrite`), one todo per active run

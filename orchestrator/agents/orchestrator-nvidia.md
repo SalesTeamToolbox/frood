@@ -32,6 +32,10 @@ constraints (e.g. "Go is capped").
    path, or it took > 2 rounds, delegate one pass to `senior` and save `<reports>/senior.md`.
 5. Re-run the Mandate's test command yourself and quote the summary.
 
+An escalation you handled is closed with `desk.mjs resolve <stream> <key> --note …` — `peer_ack` on the desk mail alone does not close it.
+
+A `desk: [nested <stream>] …` mail is for the parent: while the child is still working, leave the escalation to the child; when the child is idle or gone, message the child or handle it yourself, then close it with `desk.mjs resolve <stream> <key> --note …`.
+
 **Final message** (also write it to `<reports>/orchestrator-receipt.md`):
 ```
 RESULT: READY | BLOCKED: <reason>

@@ -57,7 +57,7 @@ const NAME_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const STATUSES = ["active", "parked", "done"];
 const HARNESSES = ["cc", "oc"];
 const SESSION_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
-const LEASE_KEYS = ["held_by", "held_session", "held_at", "taken_from", "handback_to"];
+const LEASE_KEYS = ["held_by", "held_session", "held_at", "taken_from", "handback_to", "held_parent"];
 const CLAIM_KEYS = ["session", "at", "taken_from"];
 const CHILD_HARNESSES = ["opencode", "claude-code"];
 const CHILD_ROLES = ["worker", "critic", "scout", "senior", "nested", "orchestrator"];
@@ -599,6 +599,7 @@ export function markDone(name) {
     obj.status = "done";
     obj.done_at = new Date().toISOString();
     obj.held_by = obj.held_session = obj.held_at = null; // a done stream is not held
+    obj.held_parent = null; // like the lease above: a done stream has no parent to wake either
     obj.claim = null; // and nobody is working it
     saveStream(name, obj);
     return obj;
@@ -609,7 +610,10 @@ export function markDone(name) {
 // appendEvent/appendAck/withStreamLock in here: the lock is not re-entrant). Returns {code, msg?, value?, note?}.
 // With `session` the session claim is decided and written inside that same lock acquisition, so a refused claim
 // (exit 4) leaves the pointer byte-identical: not even held_session moves.
-export function claimStream(name, by, { session, takeover = false } = {}) {
+// `parent` is the nested session's parent id (a Claude Code peer-mail transcript id or a `local_<uuid>` host id,
+// `get_session self`'s parentSessionId): it is mailed alongside the held session and woken instead of the owner
+// when the child goes idle. It is stored as `held_parent` and cleared with the lease.
+export function claimStream(name, by, { session, takeover = false, parent } = {}) {
   checkName(name);
   return withStreamLock(name, () => {
     const cur = readStream(name);
@@ -627,13 +631,16 @@ export function claimStream(name, by, { session, takeover = false } = {}) {
     }
     if (cur.held_by === by) {
       if (session !== undefined) obj.held_session = session;
+      // Same harness re-claim: an explicit --parent wins; without it a same-session re-claim keeps the
+      // recorded parent (the nested child refreshing its claim) while a different session drops it.
+      obj.held_parent = parent ?? (session === cur.held_session ? (cur.held_parent ?? null) : null);
       obj.handback_to = null;
     } else if (!cur.held_by) {
-      Object.assign(obj, { held_by: by, held_session: session ?? null, held_at: now, taken_from: null, handback_to: null });
+      Object.assign(obj, { held_by: by, held_session: session ?? null, held_at: now, taken_from: null, handback_to: null, held_parent: parent ?? null });
     } else {
       if (!takeover) return { code: 3, msg: heldLine(name, cur) };
       const from = { by: cur.held_by, session: cur.held_session };
-      Object.assign(obj, { held_by: by, held_session: session ?? null, held_at: now, taken_from: from.by, handback_to: null });
+      Object.assign(obj, { held_by: by, held_session: session ?? null, held_at: now, taken_from: from.by, handback_to: null, held_parent: parent ?? null });
       const line = { key: `takeover:${now}`, kind: "takeover", from: from.by, from_session: from.session, to: by, to_session: session ?? null, at: now };
       fs.appendFileSync(leaseFile(name), JSON.stringify(line) + "\n");
     }
@@ -672,7 +679,7 @@ export function releaseStream(name, by, { to } = {}) {
       if (to === undefined) return { code: 0, value: obj };
       obj.handback_to = to;
     } else if (cur.held_by === by) {
-      Object.assign(obj, { held_by: null, held_session: null, held_at: null, handback_to: to ?? null, claim: null });
+      Object.assign(obj, { held_by: null, held_session: null, held_at: null, held_parent: null, handback_to: to ?? null, claim: null });
     } else {
       return { code: 3, msg: heldLine(name, cur) };
     }
@@ -724,7 +731,7 @@ function usage() {
       "       handoff.mjs show [--stream <n>] | consume [--stream <n>] | list [--json]\n" +
       "       handoff.mjs ack --stream <n> --key <k> [--action <line>] [--ticket <slug>] [--resolved]\n" +
       "       handoff.mjs done --stream <n>\n" +
-      "       handoff.mjs claim --stream <n> --by <cc|oc> [--session <id>] [--takeover]\n" +
+      "       handoff.mjs claim --stream <n> --by <cc|oc> [--session <id>] [--parent <id>] [--takeover]\n" +
       "       handoff.mjs release --stream <n> --by <cc|oc> [--to <cc|oc>]\n" +
       "       handoff.mjs child --stream <n> --session <id> --harness <opencode|claude-code> --role <worker|critic|scout|senior|nested|orchestrator>\n" +
       "       (write and note also take --by <cc|oc>; exit 3 = held by the other harness; exit 4 = claimed by a live session with --session)",
@@ -768,8 +775,15 @@ function leaseResult(out) {
 
 function cmdClaim(a) {
   const { by, session } = leaseArgs(a, { requireBy: true });
+  // A parent is only ever mailed alongside a held session: --parent needs --session.
+  let parent;
+  if (a.has("parent")) {
+    parent = a.get("parent");
+    if (typeof parent !== "string" || !SESSION_RE.test(parent)) throw new Error("bad --parent");
+    if (session === undefined) throw new Error("--parent requires --session");
+  }
   const name = requireStream(a);
-  const out = claimStream(name, by, { session, takeover: a.has("takeover") });
+  const out = claimStream(name, by, { session, takeover: a.has("takeover"), parent });
   if (out.code === 0) out.value = readStream(name);
   return leaseResult(out);
 }

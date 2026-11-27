@@ -488,9 +488,9 @@ handler: orchestrator/bin/desk-check.mjs main() → orchestrator/bin/session-pre
 decides: session-pressure level (ok/warn/critical) from /proc/meminfo, /proc/loadavg and process counts; a notify-send is sent when the level rises or every 60 min while warn-or-above, never on ok, and skipped when ORCH_NO_NOTIFY=1
 
 ### desk orphan notice
-handler: orchestrator/bin/orphan.mjs `streamOrphaned` decides "orphaned / waiting on you"; orchestrator/bin/orphan-notice.mjs `launchPlan` decides what the button opens
-decides: an idle holder session is "waiting on you" (notice text + `Open session` → resume the holder), not "no live session"; a holder gone or unheld keeps today's "no live session" → "Resolve in new session"; escalations whose board ticket is `closed`/`shipped` are filtered out
-sibling traps: orchestrator/bin/desk.mjs (holder paging, sweepOrphans, pruneOrphanLedger, status), orchestrator/bin/launch-config.mjs ({session} substitution)
+handler: orchestrator/bin/orphan.mjs `streamOrphaned` decides "orphaned / waiting on you" (plus `resolvePeerSession` host-id mapping and `parentSession` liveness for the nested-parent fork); orchestrator/bin/orphan-notice.mjs `launchPlan` decides what the button opens
+decides: an idle holder session is "waiting on you" (notice text + `Open session` → resume the holder), not "no live session"; a holder gone or unheld keeps today's "no live session" → "Resolve in new session"; escalations whose board ticket is `closed`/`shipped` are filtered out; a stream held by a nested session with a live parent wakes the parent (`desk: [nested <stream>]` mail, `parent:<stream>:<held_at>` ledger in desk.mjs `pageOrphanOrParent`) instead of paging the owner; handled escalations close with `desk.mjs resolve` (`cmdResolve`, up to one resolved `RESOLVED <note>` ack per key), and a decided ESCALATE on a closed/shipped ticket steps as `STALE ticket-closed` and prints `DONE <key>` instead of replaying
+sibling traps: orchestrator/bin/desk.mjs (holder paging, `pageOrphanOrParent`, `cmdResolve`, sweepOrphans, pruneOrphanLedger, status), orchestrator/bin/launch-config.mjs ({session} substitution)
 trap: an idle Claude Code holder is alive but unreachable by peer-mail, so the page is right to fire but its text must say "waiting on you", not "no live session"
 
 ### Claude plan-usage snapshots

@@ -6,6 +6,7 @@
 //   node desk.mjs watch --events [--interval 30] [--once] [--takeover] [--until-event <sec>] [--by cc|oc]
 //   node desk.mjs daemon start [--interval 30] [--by cc|oc] [--takeover] | daemon _run (internal) | daemon stop | daemon status
 //   node desk.mjs step <stream> <key> [--by cc|oc]
+//   node desk.mjs resolve <stream> <key> --note "<what you did>" [--by cc|oc]
 //   node desk.mjs verdict <stream> <run> --findings <path>
 //   node desk.mjs merge-check <stream> <run>
 //
@@ -50,7 +51,10 @@
 //   Orphaned streams: an open escalation on a stream nobody live is working (unheld, or the holder's session silent
 //   past ORCH_ORPHAN_MIN, default 60) pages the owner ONCE per stream per claim (`orphaned` ledger in state.json) with a
 //   desktop notice whose "Resolve in new session" action opens a terminal on `/frood-next <stream>`
-//   (orphan-notice.mjs, ORCH_LAUNCH_CMD overrides the command). See orphan.mjs for the detection rules.
+//   (orphan-notice.mjs, ORCH_LAUNCH_CMD overrides the command). When the stream is held by a nested
+//   session whose parent is live (`handoff.mjs claim --parent`), the parent is peer-mailed instead
+//   (`parent:<stream>:<held_at>` ledger entry) and the owner is never paged for it. See orphan.mjs for
+//   the detection rules (`resolvePeerSession`, `parentSession`) and `pageOrphanOrParent` for the fork.
 //   That same wake-up also fires when a
 //   ticket reaches a terminal state the owner should hear about through that session — `ESCALATE merge`
 //   (ready, or merged by the daemon itself), `ESCALATE senior`, `ESCALATE owner-signoff` — so the owner never
@@ -92,7 +96,7 @@ import { fileURLToPath } from "node:url";
 import { appendAck, appendEvent, atomicWrite, listStreams, migrate, noteStream, orchRoot, readAckLines, readEvents, readStream, streamsDir, unhandled } from "./handoff.mjs";
 import { gate } from "./verdict-gate.mjs";
 import { checkScope } from "./scope-check.mjs";
-import { openEscalations, orphanLedgerKey, streamOrphaned } from "./orphan.mjs";
+import { openEscalations, orphanLedgerKey, parentSession, resolvePeerSession, streamOrphaned, ticketResolved } from "./orphan.mjs";
 export { streamOrphaned } from "./orphan.mjs";
 import { killPid, processStart, isZombie, sameStart } from "./proc-tree.mjs";
 import { agentModel, isPolicyFree, isDown, modelAllowed, policyReason } from "./pool-health.mjs";
@@ -130,13 +134,10 @@ function newId() {
 // stream a Claude Code orchestrator held fell through to the desktop page.
 const HELD_SESSION_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 
-/** Send a peer-mail message to the session that holds `stream`, so that session's
- *  orchestrator agent can resolve the escalation instead of paging the user directly.
- *  Returns true only when the message was written. Best-effort: never crashes the desk
- *  loop and never pages itself — a false return is the caller's notify-send decision. */
-function notifyHeldSession(stream, key, reason) {
-  const s = readStream(stream);
-  const toSession = s?.held_session;
+/** Send one peer-mail row to `toSession`. Returns true only when the row was written.
+ *  Split out of notifyHeldSession so the orphan page can wake a nested parent directly; both
+ *  callers (dpage, wakeHolder) still go through notifyHeldSession. Best-effort: never throws. */
+export function sendDeskMail(toSession, subject, body) {
   if (typeof toSession !== "string" || !HELD_SESSION_RE.test(toSession)) return false;
   const file = mailboxDb();
   if (!fs.existsSync(file)) {
@@ -145,7 +146,6 @@ function notifyHeldSession(stream, key, reason) {
     console.error(`daemon: cannot send peer-mail to ${toSession}: no mailbox at ${file}`);
     return false;
   }
-  const by = s.held_by === "cc" ? "cc" : "oc";
   try {
     const { DatabaseSync } = requireSqlite("node:sqlite");
     const db = new DatabaseSync(file, { readOnly: false });
@@ -157,12 +157,9 @@ function notifyHeldSession(stream, key, reason) {
      ON CONFLICT(session_id) DO UPDATE SET last_seen = ?`)
       .run(DESK_PEER_ID, Date.now(), Date.now(), Date.now());
     const now = Date.now();
-    const id = newId();
     db.prepare(`INSERT INTO messages (id, ts, from_session, from_title, from_branch, to_session, subject, body, status, expires_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'unread', ?)`)
-      .run(id, now, DESK_PEER_ID, "orchestrator desk", "", toSession,
-        `desk: ${reason}`,
-        `${reason}\n\nStream: ${stream}\nEvent: ${key}\nResolve with:\n  node ${SELF_BIN} step ${stream} ${key} --by ${by}\n`,
+      .run(newId(), now, DESK_PEER_ID, "orchestrator desk", "", toSession, subject, body,
         now + 14 * 24 * 60 * 60 * 1000);
     db.close();
     return true;
@@ -170,6 +167,31 @@ function notifyHeldSession(stream, key, reason) {
     console.error(`daemon: cannot send peer-mail to ${toSession}: ${e.message}`);
     return false;
   }
+}
+
+/** Send a peer-mail message to the session that holds `stream`, so that session's
+ *  orchestrator agent can resolve the escalation instead of paging the user directly.
+ *  When the stream records a nested parent (`held_parent`, via `handoff.mjs claim --parent`)
+ *  that resolves to a different id, the parent is mailed too, with a `[nested <stream>]`
+ *  subject — the child session may be gone while its parent is the owner's only thread.
+ *  Returns true when either mail was written. Best-effort: never crashes the desk
+ *  loop and never pages itself — a false return is the caller's notify-send decision. */
+function notifyHeldSession(stream, key, reason) {
+  const s = readStream(stream);
+  const toSession = s?.held_session;
+  if (typeof toSession !== "string" || !HELD_SESSION_RE.test(toSession)) return false;
+  const by = s.held_by === "cc" ? "cc" : "oc";
+  const body =
+    `${reason}\n\nStream: ${stream}\nEvent: ${key}\nResolve with:\n  node ${SELF_BIN} step ${stream} ${key} --by ${by}\n` +
+    `After you handle it: node ${SELF_BIN} resolve ${stream} ${key} --note "<what you did>"\n`;
+  const mailed = sendDeskMail(toSession, `desk: ${reason}`, body);
+  // A nested claim: wake the parent alongside the child (same body, nested subject). The parent id is
+  // resolved at use time — never stored mapped — so a `local_…` host id still tracks its session.
+  let parentMailed = false;
+  const rawParent = typeof s?.held_parent === "string" && s.held_parent ? s.held_parent : null;
+  const parent = rawParent ? resolvePeerSession(rawParent) : null;
+  if (parent && parent !== toSession) parentMailed = sendDeskMail(parent, `desk: [nested ${stream}] ${reason}`, body);
+  return mailed || parentMailed;
 }
 
 export const lockPath = () => path.join(orchRoot(), ".config", "orchestrator", "desk-watch.lock");
@@ -348,6 +370,7 @@ const usage = () =>
   "usage: desk.mjs status [--json] | models | watch --events [--interval 30] [--once] [--takeover] [--until-event <sec>] [--by cc|oc]\n" +
   "       desk.mjs daemon start [--interval 30] [--by cc|oc] [--takeover] | daemon stop | daemon status\n" +
   "       desk.mjs step <stream> <key> [--by cc|oc] (HELD <stream> <holder> when the other harness holds it) | verdict <stream> <worker-run> --findings <path>\n" +
+  "       desk.mjs resolve <stream> <key> --note <text> [--by cc|oc] (close one open escalation; DONE <key> when already resolved)\n" +
   "       desk.mjs merge-check <stream> <worker-run>";
 
 async function cmdWatch(opts) {
@@ -753,8 +776,9 @@ function dpage(stream, key, reason) {
   const mailed = notifyHeldSession(stream, key, reason);
   // The one desktop path: a stream nobody live is working (unheld, or its holder gone quiet) gets the
   // once-per-stream notice with a "Resolve in new session" action. A live holder keeps peer-mail only.
+  // A stream whose idle child still has a live nested parent wakes the parent instead of the owner.
   if (streamOrphaned(stream).orphaned) {
-    orphanPage(stream);
+    pageOrphanOrParent(stream);
     return;
   }
   // A missing, done or parked stream has no session to resume (/frood-next refuses it): plain page, no action.
@@ -777,6 +801,68 @@ function notifyDesktop(text) {
 }
 
 const dryOrphanLogged = new Set(); // dry run only: log each would-be page once per process, not every poll
+const dryParentLogged = new Set(); // dry run only: same, for the nested-parent wake-up
+
+/** Ledger key for a nested-parent wake-up: one wake-up per stream per claim, like the owner page. */
+const parentLedgerKey = (name, s) => `parent:${name}:${s?.held_at ?? "unheld"}`;
+
+/** Page whoever owns an orphaned stream: the nested parent when the stream is orphaned AND held AND
+ *  its resolved parent is live — otherwise the owner, exactly as today. Called from dpage's orphan
+ *  branch and from sweepOrphans in place of the bare orphanPage call; streamOrphaned's result shape
+ *  is unchanged (its `why` is never parsed here).
+ *
+ *  Parent path: once per claim (the `parent:<stream>:<held_at>` ledger entry) a
+ *  `desk: [nested <stream>] child session idle with N open escalation(s)` mail goes to the parent,
+ *  with the open keys and each key's `desk.mjs resolve` command. The entry is written only after a
+ *  successful send; a failed send falls through to orphanPage (the owner is paged). A dry run sends
+ *  nothing and writes no ledger, logging once per process instead. */
+export function pageOrphanOrParent(stream) {
+  let isOrphaned = false;
+  try {
+    isOrphaned = streamOrphaned(stream).orphaned;
+  } catch {}
+  let parent = null;
+  if (isOrphaned) {
+    try {
+      const s = readStream(stream);
+      if (s && s.held_by) {
+        const p = parentSession(stream);
+        if (p && p.live) parent = p;
+      }
+    } catch {}
+  }
+  if (parent) {
+    let state;
+    try {
+      state = readDaemonState();
+    } catch {
+      return orphanPage(stream);
+    }
+    let cur = null;
+    try {
+      cur = readStream(stream);
+    } catch {}
+    const id = parentLedgerKey(stream, cur);
+    if (state.orphaned.includes(id)) return false;
+    if (DAEMON_DRY()) {
+      if (!dryParentLogged.has(id)) {
+        dryParentLogged.add(id);
+        console.log(`daemon: DRY would wake parent of ${stream}`);
+      }
+      return false;
+    }
+    const keys = openEscalations(stream).map((e) => e.key);
+    const subject = `desk: [nested ${stream}] child session idle with ${keys.length} open escalation(s)`;
+    const body =
+      `child session idle with ${keys.length} open escalation(s) on stream ${stream}:\n` +
+      keys.map((k) => `  ${k}: node ${SELF_BIN} resolve ${stream} ${k} --note "<what you did>"`).join("\n");
+    if (!sendDeskMail(parent.id, subject, body)) return orphanPage(stream);
+    state.orphaned.push(id);
+    writeDaemonState(state);
+    return true;
+  }
+  return orphanPage(stream);
+}
 
 // Page the owner once per stream per claim about an orphaned stream. The ledger (`orphaned` in state.json, key
 // `orphan:<stream>:<held_at|unheld>`) means N escalations on one dead stream page once and a new claim re-arms it.
@@ -812,13 +898,14 @@ function orphanPage(stream) {
 // An entry also goes when the claim it recorded can never page again: the stream is deleted (no pointer file),
 // finished or parked (nothing to resume), or the stream's current held_at differs from the entry's (a newer claim
 // re-armed paging with its own key, and the old page must not suppress anything). A live orphaned stream's current
-// entry stays, so a second poll does not page it again.
+// entry stays, so a second poll does not page it again. `parent:<stream>:<held_at>` entries (the nested-parent
+// wake-up) prune by the same rules as `orphan:` entries.
 function pruneOrphanLedger() {
   if (DAEMON_DRY()) return;
   try {
     const state = readDaemonState();
     const keep = state.orphaned.filter((id) => {
-      const m = /^orphan:([^:]+):(.*)$/.exec(id);
+      const m = /^(?:orphan|parent):([^:]+):(.*)$/.exec(id);
       if (!m) return true; // unparseable: leave it alone, it can never match a stream either way
       const [, stream, claim] = m;
       const s = readStream(stream); // null for a deleted stream and for an unreadable one: both are gone
@@ -839,7 +926,7 @@ export function sweepOrphans() {
   for (const s of listStreams(Date.now())) {
     if (s.state === "corrupt" || s.status === "done" || s.status === "parked") continue;
     try {
-      if (streamOrphaned(s.name).orphaned && orphanPage(s.name)) paged.push(s.name);
+      if (streamOrphaned(s.name).orphaned && pageOrphanOrParent(s.name)) paged.push(s.name);
     } catch {}
   }
   pruneOrphanLedger();
@@ -1312,6 +1399,27 @@ function cmdStep(opts) {
   const decided = lines.find((l) => l.key === key && !l.resolved);
   if (decided) {
     const action = decided.action ?? "";
+    // A decided ESCALATE on a closed ticket is stale, not a replay: the worktree is gone (closedTicket) or
+    // the board ticket reached `closed`/`shipped` (ticketResolved on the stream's repo) after the decision
+    // was recorded. Resolve it as STALE and print DONE, before the `decided` branch replays the line —
+    // the replay runs first, so without this the owner would re-see every shipped escalation forever.
+    // A decided ESCALATE on an open ticket replays exactly as today, and every non-ESCALATE decided
+    // action keeps today's effectPresent logic unchanged.
+    if (action.startsWith("ESCALATE") && run && (kind === "run-done" || kind === "run-dead" || kind === "verdict")) {
+      const closed = closedTicket(events, run);
+      const repo = readStream(stream)?.repo ?? "";
+      if (closed || ticketResolved(key, repo)) {
+        const slug = (closed && typeof closed.ticket === "string" && closed.ticket) || decided.ticket || "";
+        try {
+          appendAck(stream, key, STALE, { resolved: true, ...(slug ? { ticket: slug } : {}) });
+        } catch (e) {
+          console.error(`desk: cannot ack ${key}: ${e.message}`);
+          return 2;
+        }
+        console.log(`DONE ${key}`);
+        return 0;
+      }
+    }
     console.log(effectPresent(key, action, events, lines) ? `DONE ${key}` : action.replace(/\\/g, "/"));
     return 0;
   }
@@ -1360,6 +1468,87 @@ function cmdStep(opts) {
     return 2;
   }
   console.log(line);
+  return 0;
+}
+
+// ---------------------------------------------------------------- resolve (close one escalation by hand)
+
+// `resolve` closes one open escalation with a resolved `RESOLVED <note>` ack: after it, `step` on the
+// key prints DONE, `daemon status` no longer lists it, `openEscalations` drops it, and `streamOrphaned`
+// stops counting it (all through the existing resolved-ack reads). A nested session that handled its
+// desk mail runs this; `peer_ack` alone never closes the escalation. Idempotent: an already-resolved
+// key prints DONE and writes nothing. Refusals (exit 2, one stderr line): a missing stream, a
+// missing/empty `--note`, a `--note` with a newline, and a key with no escalation on that stream
+// (no unresolved ESCALATE line and no escalations.jsonl row). `--by` is accepted and validated like
+// `step`'s, with no HELD refusal: whoever handled the escalation may resolve it.
+function cmdResolve(opts) {
+  const [stream, key] = opts.args ?? [];
+  const note = opts.note;
+  if (opts.by !== undefined && !BY.has(opts.by)) {
+    console.error(`desk: --by must be cc or oc\n${usage()}`);
+    return 2;
+  }
+  if (!stream || !streamExists(stream)) {
+    console.error(stream ? `desk: no stream ${stream}` : "usage: desk.mjs resolve <stream> <key> --note <text>");
+    return 2;
+  }
+  if (!key) {
+    console.error("usage: desk.mjs resolve <stream> <key> --note <text>");
+    return 2;
+  }
+  if (typeof note !== "string" || !note) {
+    console.error("desk: resolve needs --note <text>");
+    return 2;
+  }
+  if (/[\r\n]/.test(note)) {
+    console.error("desk: --note must be one line");
+    return 2;
+  }
+  let lines;
+  try {
+    lines = readAckLines(stream);
+  } catch (e) {
+    console.error(`desk: cannot read acks for ${stream}: ${e.message}`);
+    return 2;
+  }
+  // Idempotent: a key with a resolved ack is done, whatever else is on file. Writes nothing.
+  if (lines.some((l) => l.key === key && l.resolved)) {
+    console.log(`DONE ${key}`);
+    return 0;
+  }
+  // A key "has an escalation" when an unresolved ESCALATE line names it, or escalations.jsonl rows it
+  // (a page written before any step ran, or for an event the desk pages directly).
+  const decided = lines.find((l) => l.key === key && !l.resolved && String(l.action ?? "").startsWith("ESCALATE"));
+  let hasRow = false;
+  try {
+    for (const line of fs.readFileSync(daemonEscFile(), "utf8").split("\n")) {
+      if (!line.trim()) continue;
+      let e;
+      try {
+        e = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      // A `child:` key is a child-session record, never an escalation (openEscalations drops them);
+      // resolving one would ack something the desk never counted.
+      if (e && e.stream === stream && e.key === key && !String(e.key).startsWith("child:")) {
+        hasRow = true;
+        break;
+      }
+    }
+  } catch {}
+  if (!decided && !hasRow) {
+    console.error(`desk: no escalation for ${key} on stream ${stream}`);
+    return 2;
+  }
+  // The ticket rides along when the decision line named one (escalations.jsonl rows carry none).
+  try {
+    appendAck(stream, key, `RESOLVED ${note}`, { resolved: true, ...(decided?.ticket ? { ticket: decided.ticket } : {}) });
+  } catch (e) {
+    console.error(`desk: cannot ack ${key}: ${e.message}`);
+    return 2;
+  }
+  console.log(`RESOLVED ${stream} ${key}`);
   return 0;
 }
 
@@ -2005,6 +2194,8 @@ async function daemonRun(by, interval, token) {
 }
 
 // Escalations the owner has not resolved yet (resolved acks clear them from `status`).
+// Rows whose board ticket is `closed`/`shipped` are dropped too — the same filter `openEscalations`
+// applies — so a shipped ticket's page stops showing up in `daemon status`.
 function pendingEscalations() {
   let rows = [];
   try {
@@ -2014,7 +2205,11 @@ function pendingEscalations() {
   }
   return rows.filter((e) => {
     try {
-      return !readAckLines(e.stream).some((l) => l.key === e.key && l.resolved);
+      if (readAckLines(e.stream).some((l) => l.key === e.key && l.resolved)) return false;
+      const s = readStream(e.stream);
+      const repo = s && typeof s.repo === "string" && s.repo ? s.repo : "";
+      if (ticketResolved(e.key, repo)) return false;
+      return true;
     } catch {
       return true;
     }
@@ -2205,7 +2400,7 @@ function cmdModels() {
 
 // ---------------------------------------------------------------- main
 
-function parse(argv, { allowArgs = false } = {}) {
+function parse(argv, { allowArgs = false, cmd = null } = {}) {
   const opts = {};
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
@@ -2217,6 +2412,7 @@ function parse(argv, { allowArgs = false } = {}) {
     else if (k === "--by") opts.by = argv[++i];
     else if (k === "--until-event") opts.untilEvent = Number(argv[++i]);
     else if (allowArgs && k === "--findings") opts.findings = argv[++i];
+    else if (allowArgs && cmd === "resolve" && k === "--note") opts.note = argv[++i];
     else if (allowArgs && !k.startsWith("--")) (opts.args ??= []).push(k);
     else throw new Error(`unknown flag ${k}`);
   }
@@ -2234,10 +2430,10 @@ export async function main(argv) {
   } catch (e) {
     console.error(`desk: migrate failed: ${e.message}`); // a broken legacy file must not take the desk down
   }
-  const allowArgs = cmd === "step" || cmd === "verdict" || cmd === "merge-check" || cmd === "daemon";
+  const allowArgs = cmd === "step" || cmd === "resolve" || cmd === "verdict" || cmd === "merge-check" || cmd === "daemon";
   let opts;
   try {
-    opts = parse(rest, { allowArgs });
+    opts = parse(rest, { allowArgs, cmd });
   } catch (e) {
     console.error(`desk: ${e.message}`);
     return 2;
@@ -2247,6 +2443,7 @@ export async function main(argv) {
   if (cmd === "watch") return cmdWatch(opts);
   if (cmd === "daemon") return cmdDaemon(opts);
   if (cmd === "step") return cmdStep(opts);
+  if (cmd === "resolve") return cmdResolve(opts);
   if (cmd === "verdict") return cmdVerdict(opts);
   if (cmd === "merge-check") return cmdMergeCheck(opts);
   console.error(usage());

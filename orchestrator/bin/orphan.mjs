@@ -32,6 +32,20 @@ export function orphanThresholdMs() {
   return min * 60_000;
 }
 
+// How long after its last stop a parent session is still woken by its Stop hook
+// (`orchestrator/hooks/peer-mail-wake.js` polls the mailbox and rewakes the session for
+// `PEER_WAKE_MAX_MIN`, default 1440 min). A parent found with a live pid counts as live while
+// it is inside this window; a parent with no live pid keeps the orphan threshold. Same env
+// var and default as the hook; invalid or empty falls back to the default. Read-only for
+// tests via env, like `orphanThresholdMs`.
+export function wakeWindowMs() {
+  const raw = process.env.PEER_WAKE_MAX_MIN;
+  if (raw === undefined || !raw.trim()) return 1440 * 60_000;
+  const min = Number(raw);
+  if (!Number.isFinite(min) || min < 0) return 1440 * 60_000;
+  return min * 60_000;
+}
+
 const mailboxFile = () => path.join(orchRoot(), ".local", "share", "opencode-peer-mail", "mailbox.db");
 const opencodeDbFile = () => (process.env.PEER_MAIL_OC_DB ?? "").trim() || path.join(orchRoot(), ".local", "share", "opencode", "opencode.db");
 const escalationsFile = () => path.join(orchRoot(), ".config", "orchestrator", "desk-daemon", "escalations.jsonl");
@@ -297,3 +311,115 @@ export function streamOrphaned(name, now = Date.now()) {
 
 /** Ledger key: one page per stream per claim. A new claim (new held_at) re-arms it. */
 export const orphanLedgerKey = (name, s = readStream(name)) => `orphan:${name}:${s?.held_at ?? "unheld"}`;
+
+/** Map a stored `held_parent` id to the peer-mail session id that can be mailed.
+ *  A `local_<uuid>` host id (what `get_session self` shows as `parentSessionId`) is resolved through
+ *  `<home>/.claude/sessions/<pid>.json` files: skip non-`.json` siblings (`.key` files), match
+ *  `hostSessionId === id`, return its `sessionId`. When several files match, a live pid wins first,
+ *  then the newest `statusUpdatedAt`/`updated`. Any other id is returned as is (it is already a
+ *  peer-mail id); an unmapped `local_…` id returns null. The mapping is resolved at use time, never
+ *  stored: a `sessionId` can change under one host id. Read-only; `home` is injectable for tests. */
+export function resolvePeerSession(id, home = orchRoot()) {
+  if (typeof id !== "string" || !id) return null;
+  if (!id.startsWith("local_")) return id;
+  let matches = [];
+  try {
+    const entries = fs.readdirSync(SESSION_DIR(home), { withFileTypes: true });
+    for (const e of entries) {
+      if (!e.isFile() || !/\.json$/.test(e.name)) continue;
+      const pid = Number(e.name.replace(/\.json$/, ""));
+      if (!Number.isInteger(pid) || pid <= 0) continue;
+      let s;
+      try {
+        s = JSON.parse(fs.readFileSync(path.join(SESSION_DIR(home), e.name), "utf8"));
+      } catch {
+        continue;
+      }
+      if (!s || typeof s !== "object" || s.hostSessionId !== id || typeof s.sessionId !== "string" || !s.sessionId) continue;
+      let live = false;
+      try {
+        process.kill(pid, 0);
+        live = true;
+      } catch (err) {
+        live = err.code === "EPERM";
+      }
+      const updated = Number(s.statusUpdatedAt ?? s.updated);
+      matches.push({ sessionId: s.sessionId, live, updated: Number.isFinite(updated) ? updated : -Infinity });
+    }
+  } catch {
+    return null;
+  }
+  if (!matches.length) return null;
+  matches.sort((a, b) => (b.live - a.live) || (b.updated - a.updated));
+  return matches[0].sessionId;
+}
+
+/** The nested parent of `stream`, for the orphan page: `{ id, idleMs, live }` for the resolved
+ *  parent session, or null when the stream has no `held_parent` or it cannot be resolved.
+ *  `idleMs` follows the `holderSession` cc rules (session-file `status: idle` + `statusUpdatedAt`,
+ *  else transcript mtime, plus peer-mail `peers.last_seen`, newest wins). `live` needs the parent
+ *  found AND inside its window: a parent with a live pid in `<home>/.claude/sessions/` stays live
+ *  while `idleMs <= wakeWindowMs()` (the Stop hook rewakes it that long after its last stop), while
+ *  a parent with no live pid (transcript or peer-mail `last_seen` only) keeps the
+ *  `orphanThresholdMs()` bound. A live pid alone is still not enough — a parent idle past the wake
+ *  window stops suppressing the owner page. Read-only. */
+export function parentSession(stream, home = orchRoot()) {
+  let s;
+  try {
+    s = readStream(stream);
+  } catch {
+    return null;
+  }
+  const parent = s?.held_parent;
+  if (typeof parent !== "string" || !parent) return null;
+  const id = resolvePeerSession(parent, home);
+  if (!id) return null;
+  const now = Date.now();
+  const idle = newest([
+    parentIdleMs(parent, id, home, now, s),
+    sessionSeen(id),
+  ]);
+  if (idle === null || !Number.isFinite(idle)) return null;
+  const idleMs = now - idle;
+  const bound = parentLivePid(id, home) !== null ? wakeWindowMs() : orphanThresholdMs();
+  return { id, idleMs, live: idleMs <= bound };
+}
+
+// The live pid behind a resolved parent id, or null: the first `<home>/.claude/sessions/<pid>.json`
+// whose session id matches and whose pid is alive. Shared by `parentIdleMs` (what the parent was
+// doing) and `parentSession` (which liveness window applies).
+function parentLivePid(id, home) {
+  try {
+    const entries = fs.readdirSync(SESSION_DIR(home), { withFileTypes: true });
+    for (const e of entries) {
+      if (!e.isFile() || !/\.json$/.test(e.name)) continue;
+      const pid = Number(e.name.replace(/\.json$/, ""));
+      if (!Number.isInteger(pid) || pid <= 0) continue;
+      const sf = sessionFile(home, pid);
+      if (!sf || sf.sessionId !== id) continue;
+      try { if (process.kill(pid, 0)) return pid; } catch (err) { if (err.code === "EPERM") return pid; }
+    }
+  } catch {}
+  return null;
+}
+
+// Newest sign of life for a parent id: the cc session-file/transcript rules from holderSession,
+// keyed on the resolved peer-mail id, plus the stream activity fallback for a `local_…` host id
+// whose transcript lives under the host id itself.
+function parentIdleMs(parent, id, home, now, s) {
+  const foundPid = parentLivePid(id, home);
+  if (foundPid !== null) {
+    const sf = sessionFile(home, foundPid);
+    if (sf && sf.status === "idle" && Number.isFinite(sf.statusUpdatedAt)) return sf.statusUpdatedAt;
+    const tr = transcriptInfo(home, id, sf ? sf.cwd : null, now);
+    if (tr.ms != null) return now - tr.ms;
+    const host = transcriptInfo(home, parent, sf ? sf.cwd : null, now);
+    if (host.ms != null) return now - host.ms;
+    return null;
+  }
+  const tr = transcriptInfo(home, id, s?.repo ? path.resolve(s.repo) : null, now);
+  if (tr.ms != null) return now - tr.ms;
+  const host = transcriptInfo(home, parent, s?.repo ? path.resolve(s.repo) : null, now);
+  if (host.ms != null) return now - host.ms;
+  return null;
+}

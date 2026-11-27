@@ -1253,3 +1253,59 @@ test("unhandled still returns a real unhandled event", () => {
     assert.equal(un[0].kind, "dead");
   });
 });
+
+// ------------------------------------------------------------------ nested holder parent (claim --parent)
+
+test("claim --parent stores held_parent; a claim without it leaves null; show prints it", () => {
+  const { e, h } = leased();
+  const c = run(e, "claim", "--stream", "s1", "--by", "cc", "--session", "sess-1", "--parent", "local_abc-123");
+  assert.equal(c.status, 0, c.stderr);
+  assert.equal(JSON.parse(c.stdout).held_parent, "local_abc-123");
+  assert.equal(stream(h, "s1").held_parent, "local_abc-123");
+  assert.equal(JSON.parse(run(e, "show", "--stream", "s1").stdout).held_parent, "local_abc-123");
+  // a stream written before this change reads as held_parent: null
+  const { e: e2, h: h2 } = leased();
+  run(e2, "claim", "--stream", "s1", "--by", "cc", "--session", "sess-1");
+  assert.equal(stream(h2, "s1").held_parent, null);
+});
+
+test("claim --parent without --session exits 2; a bad --parent exits 2; nothing is written", () => {
+  const { e, h } = leased();
+  const bytes = fs.readFileSync(jpath(h, "s1"));
+  const nosess = run(e, "claim", "--stream", "s1", "--by", "cc", "--parent", "local_abc-123");
+  assert.equal(nosess.status, 2);
+  assert.match(nosess.stderr, /--parent requires --session/);
+  const bad = run(e, "claim", "--stream", "s1", "--by", "cc", "--session", "sess-1", "--parent", "bad id!");
+  assert.equal(bad.status, 2);
+  assert.match(bad.stderr, /bad --parent/);
+  assert.deepEqual(fs.readFileSync(jpath(h, "s1")), bytes);
+});
+
+test("same-harness re-claim keeps held_parent for the same session, drops it for a different session", () => {
+  const { e, h } = leased();
+  run(e, "claim", "--stream", "s1", "--by", "cc", "--session", "sess-1", "--parent", "local_p1");
+  assert.equal(stream(h, "s1").held_parent, "local_p1");
+  // same session, no --parent: kept
+  assert.equal(run(e, "claim", "--stream", "s1", "--by", "cc", "--session", "sess-1").status, 0);
+  assert.equal(stream(h, "s1").held_parent, "local_p1");
+  // different session, no --parent: dropped (takeover re-arms the claim)
+  assert.equal(run(e, "claim", "--stream", "s1", "--by", "cc", "--session", "sess-2", "--takeover").status, 0);
+  assert.equal(stream(h, "s1").held_parent, null);
+  // an explicit --parent always wins
+  assert.equal(run(e, "claim", "--stream", "s1", "--by", "cc", "--session", "sess-2", "--parent", "local_p2").status, 0);
+  assert.equal(stream(h, "s1").held_parent, "local_p2");
+});
+
+test("takeover stores --parent; release and done null held_parent", () => {
+  const { e, h } = leased();
+  run(e, "claim", "--stream", "s1", "--by", "cc", "--session", "a1", "--parent", "local_old");
+  const t = run(e, "claim", "--stream", "s1", "--by", "oc", "--session", "b1", "--parent", "local_new", "--takeover");
+  assert.equal(t.status, 0, t.stderr);
+  assert.equal(JSON.parse(t.stdout).held_parent, "local_new");
+  const r = run(e, "release", "--stream", "s1", "--by", "oc");
+  assert.equal(r.status, 0);
+  assert.equal(JSON.parse(r.stdout).held_parent, null);
+  run(e, "claim", "--stream", "s1", "--by", "cc", "--session", "a1", "--parent", "local_x");
+  run(e, "done", "--stream", "s1");
+  assert.equal(stream(h, "s1").held_parent, null);
+});
