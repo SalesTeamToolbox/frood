@@ -13,7 +13,7 @@ STT/Volnova code.
 | Memory | `/api/memory/search`, `/api/memory/stats`, `/api/knowledge/learn`, `/api/learnings/retrieve`, `/api/consolidate/trigger` | Recall, learnings, and memory-pipeline outcome |
 | Effectiveness & recommendations | `/api/effectiveness/*`, `/api/recommendations/retrieve` | Tool success-rate tracking and next-tool recommendation |
 | LLM proxy | `/llm/*`, `/v1/messages`, `/api/models/*` | Model routing tier and chat/completions outcome |
-| Providers | `/api/providers`, `/api/settings/provider-status`, `/api/models/health*` | Provider connectivity and paid/free classification |
+| Providers | `/api/providers`, `/api/settings/provider-status`, `/api/cc/pace`, `/api/models/health*` | Provider connectivity and paid/free classification |
 | Tools | `/api/tools`, `/api/tools/{name}`, `/api/skills`, `/api/skills/{name}` | Tool/skill enabled/disabled state |
 | CLI setup | `/api/cli-setup/detect`, `/api/cli-setup/wire` | Cross-CLI wiring state |
 | Settings | `/api/settings/keys`, `/api/settings/env`, `/api/settings/storage*`, `/api/settings/probe-models`, `/api/settings/openrouter-status`, `/api/settings/rlm-status` | Runtime configuration and storage/backend mode |

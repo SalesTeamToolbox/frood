@@ -2587,6 +2587,15 @@ Focus on learnings that would help in future similar sessions."""
             "note": "Provider registry removed in v2.0 MCP pivot",
         }
 
+    @app.get("/api/cc/pace")
+    async def get_cc_pace(
+        _admin: AuthContext = Depends(require_admin),
+    ):
+        """Return the read-only Claude Code subscription pace (core.cc_pace)."""
+        from core.cc_pace import read_pace
+
+        return await read_pace()
+
     @app.get("/api/settings/provider-status")
     async def get_provider_status(
         _admin: AuthContext = Depends(require_admin),

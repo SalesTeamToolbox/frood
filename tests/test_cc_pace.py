@@ -10,6 +10,7 @@ The fake "node" is a small Python script in ``tmp_path`` passed as ``CC_PACE_NOD
 ``CC_PACE_MJS`` is pointed at a dummy file. Each spawn appends a line to a counter file.
 """
 
+import asyncio
 import json
 import os
 import sys
@@ -182,3 +183,46 @@ def test_settings_defaults(monkeypatch):
     assert s.cc_pace_enabled is True
     assert s.cc_pace_node == "node"
     assert s.cc_pace_orch_home == ""
+
+
+async def test_returned_dict_is_a_copy_of_the_cache(monkeypatch, tmp_path):
+    node, counter = _fake(tmp_path, 'print(\'{"state": "under", "weekly": 40}\')\n')
+    _use_settings(monkeypatch, CC_PACE_NODE=node)
+    clock = iter([0.0, 1.0, 2.0])
+    first = await cc_pace.read_pace(now=lambda: next(clock))
+    first["state"] = "mutated"
+    first.pop("weekly")
+    second = await cc_pace.read_pace(now=lambda: next(clock))
+    assert second == {"state": "under", "weekly": 40}
+    second["weekly"] = 99
+    third = await cc_pace.read_pace(now=lambda: next(clock))
+    assert third == {"state": "under", "weekly": 40}
+    assert _spawns(counter) == 1
+
+
+async def test_cancel_kills_and_reaps_child(monkeypatch, tmp_path):
+    started = tmp_path / "started"
+    node, _ = _fake(tmp_path, f"open({str(started)!r}, 'w').write('x')\ntime.sleep(30)\n")
+    _use_settings(monkeypatch, CC_PACE_NODE=node)
+    captured = []
+    real = cc_pace.asyncio.create_subprocess_exec
+
+    async def spy(*a, **kw):
+        proc = await real(*a, **kw)
+        captured.append(proc)
+        return proc
+
+    monkeypatch.setattr(cc_pace.asyncio, "create_subprocess_exec", spy)
+    task = asyncio.ensure_future(cc_pace.read_pace(timeout_s=20))
+    for _ in range(200):  # wait (max ~10 s) until the fake child is asleep
+        if started.exists():
+            break
+        await asyncio.sleep(0.05)
+    assert started.exists()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert len(captured) == 1
+    assert captured[0].returncode is not None
+    with pytest.raises(ProcessLookupError):  # killed and reaped: the pid is gone
+        os.kill(captured[0].pid, 0)

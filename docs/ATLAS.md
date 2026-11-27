@@ -194,6 +194,12 @@ decides: live connectivity status per configured LLM provider
 sibling traps: /api/providers, /api/models/health, /api/settings/openrouter-status
 topic: docs/atlas/routes.md
 
+### /api/cc/pace
+handler: dashboard.server.create_app.get_cc_pace
+decides: read-only Claude Code subscription pace (state, weekly/projected/5-hour %) via core.cc_pace.read_pace; admin only
+sibling traps: /api/settings/provider-status
+topic: docs/atlas/routes.md
+
 ### /api/models/health
 handler: dashboard.server.create_app.get_model_health
 decides: model health check results and provider health summary

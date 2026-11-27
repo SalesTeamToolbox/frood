@@ -66,6 +66,9 @@ const state = {
   // Provider status
   providerStatus: null,
   providerStatusLoading: false,
+  // Claude Code subscription pace (read-only, /api/cc/pace)
+  ccPace: null,
+  ccPaceLoading: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -1474,6 +1477,9 @@ function renderSettingsPanel() {
       if (!state.providerStatus && !state.providerStatusLoading) {
         loadProviderStatus().then(renderSettingsPanel);
       }
+      if (!state.ccPace && !state.ccPaceLoading) {
+        loadCcPace().then(renderSettingsPanel);
+      }
 
       // Section 2: API Key Providers
       html += '<h4 style="margin:0 0 0.75rem;font-size:0.95rem">LLM Providers</h4>';
@@ -1504,6 +1510,20 @@ function renderSettingsPanel() {
         html += '<div class="help" style="font-size:0.77rem"><a href="#" onclick="state.providerStatus=null;renderSettingsPanel();return false">Refresh</a></div>';
       } else {
         html += '<div class="help">' + (state.providerStatusLoading ? 'Checking connectivity...' : 'Status unavailable.') + '</div>';
+      }
+
+      // Section 4a: Claude Code subscription pace (read-only; hidden when null or "off")
+      var cp = state.ccPace;
+      if (cp && cp.state && cp.state !== "off") {
+        var cpState = String(cp.state).toUpperCase();
+        var cpLine;
+        if (cp.weekly == null || cp.projected == null) {
+          cpLine = 'Claude subscription: ' + cpState + ' (' + (cp.reason || 'no data') + ')';
+        } else {
+          cpLine = 'Claude subscription: ' + cpState + ' \u00b7 week ' + Math.round(cp.weekly) + '% \u2192 ' + Math.round(cp.projected) + '% \u00b7 5-hour ' + (cp.five_hour == null ? '?' : Math.round(cp.five_hour)) + '%';
+        }
+        html += '<h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Claude Subscription Pace</h4>';
+        html += '<div class="help">' + esc(cpLine) + '</div>';
       }
 
       // Section 4b: Per-provider paid-model authorization + re-probe control
@@ -1926,6 +1946,15 @@ async function loadProviderStatus() {
     state.providerStatus = (await api("/settings/provider-status")) || null;
   } catch (e) { state.providerStatus = null; }
   state.providerStatusLoading = false;
+}
+
+async function loadCcPace() {
+  state.ccPaceLoading = true;
+  try {
+    // On error, fall back to "off" (card hidden) so the panel does not re-request in a loop.
+    state.ccPace = (await api("/cc/pace")) || { state: "off" };
+  } catch (e) { state.ccPace = { state: "off" }; }
+  state.ccPaceLoading = false;
 }
 
 async function loadAgentModels(provider) {

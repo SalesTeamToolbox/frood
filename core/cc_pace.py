@@ -90,12 +90,22 @@ async def _run(settings, timeout_s: float) -> dict:
     try:
         stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout_s)
     except TimeoutError:
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
-        await proc.wait()
         return _unknown("timeout")
+    finally:
+        # Any exit from communicate() (timeout, cancellation, other error) kills and
+        # reaps a still-running child. The reap is shielded so a cancellation cannot
+        # interrupt it; the original exception (CancelledError included) propagates.
+        if proc.returncode is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            reap = asyncio.ensure_future(proc.wait())
+            try:
+                await asyncio.shield(reap)
+            except asyncio.CancelledError:
+                await reap  # a second cancel: still finish the reap, then re-raise
+                raise
 
     if proc.returncode != 0:
         return _unknown(f"exit {proc.returncode}")
@@ -111,15 +121,15 @@ async def read_pace(*, timeout_s: float = 10.0, now: Callable[[], float] = time.
     global _cache
     settings = config.settings  # read at call time; reload_from_env mutates in place
     if not settings.cc_pace_enabled:
-        return {"state": "off"}
+        return {"state": "off"}  # a fresh dict every call
 
     t = now()
     if _cache is not None and t - _cache[0] < CACHE_TTL_S:
-        return _cache[1]
+        return dict(_cache[1])
 
     try:
         result = await _run(settings, timeout_s)
     except Exception:  # never raise; keep the reason set closed
         result = _unknown("exit -1")
     _cache = (t, result)
-    return result
+    return dict(result)  # a copy: callers cannot mutate the cache
