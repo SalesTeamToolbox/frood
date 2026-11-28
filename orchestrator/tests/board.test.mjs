@@ -1444,6 +1444,37 @@ test("ready: a critic-only SENIOR_REVIEW is passed by --senior-skip and records 
   assert.equal(t.senior.skipped.sha, sha, "skipped is bound to the signed-off sha");
 });
 
+test("ready: --senior-skip is refused when senior is not required or already covered", () => {
+  // (a) senior not required at all: --senior-skip is refused, nothing written
+  const c = mk();
+  workingTicket(c, "rs6a");
+  const sha = landBlastFile(c);
+  round(c, "rs6a", { findings: "findings/approved.md", reviewed: sha });
+  assert.equal(JSON.parse(bytes(ticketFile(c, "rs6a"))).senior.required, false);
+  signedCritic(c, "rs6a");
+  gatesOk(c, "rs6a");
+  const refused = board(c, "ready", "rs6a", "--owner", "s1", "--senior-skip", "a reason that is long enough to pass the length check");
+  assert.equal(refused.status, 1, refused.stderr);
+  assert.match(refused.stderr, /--senior-skip is only for a critic-only senior reason/);
+  assert.equal(JSON.parse(bytes(ticketFile(c, "rs6a"))).stage, "working", "nothing was written");
+  assert.equal(JSON.parse(bytes(ticketFile(c, "rs6a"))).senior.skipped, undefined, "no skipped recorded");
+
+  // (b) a paid human signoff already covers the sha: --senior-skip is refused
+  const c2 = mk();
+  workingTicket(c2, "rs6b");
+  const sha2 = landBlastFile(c2);
+  round(c2, "rs6b", { findings: "findings/senior-needed.md", reviewed: sha2 });
+  signedCritic(c2, "rs6b");
+  gatesOk(c2, "rs6b");
+  const human = board(c2, "signoff", "rs6b", "--by", "human");
+  assert.equal(human.status, 0, human.stderr);
+  assert.equal(JSON.parse(bytes(ticketFile(c2, "rs6b"))).senior.required, true);
+  const refused2 = board(c2, "ready", "rs6b", "--owner", "s1", "--senior-skip", "a reason that is long enough to pass the length check");
+  assert.equal(refused2.status, 1, refused2.stderr);
+  assert.match(refused2.stderr, /--senior-skip is only for a critic-only senior reason/);
+  assert.equal(JSON.parse(bytes(ticketFile(c2, "rs6b"))).stage, "working", "nothing was written");
+});
+
 test("ready: --senior-skip is refused for guarded-path and counted-rounds reasons and for a short reason", () => {
   // (a) guarded path: scope covers ops/ so the fence passes, but recomputeSenior flags ops/release.sh
   const c = mk();
@@ -1458,7 +1489,7 @@ test("ready: --senior-skip is refused for guarded-path and counted-rounds reason
   gatesOk(c, "rs3");
   const refused = board(c, "ready", "rs3", "--owner", "s1", "--senior-skip", "the critic only advised it and the orchestrator decides");
   assert.equal(refused.status, 1, refused.stderr);
-  assert.match(refused.stderr, /guarded path: ops\/release\.sh/);
+  assert.match(refused.stderr, /--senior-skip cannot override: .*guarded path: ops\/release\.sh/);
   assert.equal(JSON.parse(bytes(ticketFile(c, "rs3"))).stage, "working", "nothing was written");
 
   // (b) counted rounds 3 > 2
@@ -1472,7 +1503,7 @@ test("ready: --senior-skip is refused for guarded-path and counted-rounds reason
   gatesOk(c2, "rs4");
   const refused2 = board(c2, "ready", "rs4", "--owner", "s1", "--senior-skip", "the critic only advised it and the orchestrator decides");
   assert.equal(refused2.status, 1, refused2.stderr);
-  assert.match(refused2.stderr, /counted rounds 3 > 2/);
+  assert.match(refused2.stderr, /--senior-skip cannot override: .*counted rounds 3 > 2/);
   assert.equal(JSON.parse(bytes(ticketFile(c2, "rs4"))).stage, "working");
 
   // (c) a reason under 20 characters is refused before any reason is inspected

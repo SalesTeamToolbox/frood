@@ -455,7 +455,7 @@ decides: whether a worker's committed diff may land — a path outside --scope o
 topic: docs/atlas/desk.md
 
 ### board: sweep liveness and the ready senior rule
-handler: orchestrator/bin/board.mjs liveWorker() (ps start vs assignment.worker.started via sameStart, 3 s tolerance) and orchestrator/bin/board.mjs cmdReady() (senior rule: paid senior/human signoff, or `--senior-skip "<reason>" when every live senior reason starts with `critic:`))
+handler: orchestrator/bin/board.mjs liveWorker() (ps start vs assignment.worker.started via sameStart, 3 s tolerance) and orchestrator/bin/board.mjs cmdReady() (senior rule: a paid senior or human signoff, or --senior-skip "<reason>" when every live senior reason starts with critic:)
 decides: a live worker whose ps start drifted 1-3 s stays live (more than 3 s is a recycled pid -> missed sweep); `ready` refuses without a paid senior/human signoff unless `--senior-skip` is given and every senior reason starts with `critic:` (reason >=20 chars), recording `senior.skipped.{by,reason,at,sha}`; a round recompute clears `skipped`. Guarded-path and counted-rounds reasons can never be skipped.
 
 ### oc-worker load-based slots

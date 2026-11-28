@@ -26,7 +26,8 @@
 //                       (--critic-receipt <path> | --native-critic sonnet|haiku|opus)
 //   signoff <id> --by critic|senior|human [--owner <s>]
 //   signoff <id> --by senior --owner <s> --findings <path> (--receipt <path> | --native <alias>)
-//   gates <id> --owner <s>       |   ready <id> --owner  [--senior-skip "<reason>"]   (only when every senior reason starts with `critic:`)<s>
+//   gates <id> --owner        |   ready <id> --owner  [--senior-skip "<reason>"]
+//                             (accepted only when every senior reason starts with `critic:`)
 //   verify <id> --sha <sha>      |   shipped <id> --sha <sha>
 //   reopen <id> --owner <s> --harness claude|opencode --note <why> [--worktree <path>]
 //          (ready -> working after the train refused the sha: every live signoff is invalidated, the round cap
@@ -1355,6 +1356,8 @@ function cmdReady(ctx, id) {
         throw new Refuse(`--senior-skip cannot override: ${nonSkippable.join("; ")}`);
       }
       t.senior.skipped = { by: owner, reason: skip, at: now(), sha: sig.reviewed_sha };
+    } else if (text(o, "senior-skip")) {
+      throw new Refuse("--senior-skip is only for a critic-only senior reason");
     }
     for (const argv of ctx.adapter.gates) {
       const ok = t.gates.find((g) => isArr(g.argv) && g.argv.join("\0") === argv.join("\0") && g.sha === sig.reviewed_sha && g.exit === 0);
