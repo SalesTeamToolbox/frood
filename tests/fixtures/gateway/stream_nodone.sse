@@ -1,0 +1,3 @@
+data: {"id":"cmpl_1","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"content":"Bye"},"finish_reason":"stop"}]}
+
+data: {"id":"cmpl_1","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{}}],"usage":{"prompt_tokens":2,"completion_tokens":1}}

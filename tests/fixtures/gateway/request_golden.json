@@ -1,0 +1,84 @@
+{
+  "model": "nvidia/nemotron",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are helpful\n\nBe concise"
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:image/png;base64,ABCDEF"
+          }
+        },
+        {
+          "type": "text",
+          "text": "Look at this"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": "I'll use a tool",
+      "tool_calls": [
+        {
+          "id": "toolu_1",
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "arguments": "{\"city\": \"NYC\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_1",
+      "content": "It is sunny"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_2",
+      "content": "ERROR: error happened"
+    },
+    {
+      "role": "user",
+      "content": "Thanks"
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_weather",
+        "description": "Get weather",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "city": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "calc",
+        "description": "Calculate",
+        "parameters": {
+          "type": "object"
+        }
+      }
+    }
+  ],
+  "tool_choice": "required",
+  "max_tokens": 1024,
+  "temperature": 0.7,
+  "top_p": 0.9,
+  "stop": ["STOP"]
+}
