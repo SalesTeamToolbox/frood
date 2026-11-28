@@ -190,13 +190,13 @@ topic: docs/atlas/routes.md
 
 ### /gw/v1/models
 handler: dashboard.gateway.build_gateway_router
-decides: routed Go model list (same route table and auth as /gw/v1/messages)
+decides: routed Go model ids, plus Nvidia-routed ids when an Nvidia key resolves (same route table and auth as /gw/v1/messages)
 sibling traps: /gw/v1/messages, /gw/v1/routes, /gw/v1/messages/count_tokens, /llm/v1/messages, /v1/messages
 topic: docs/atlas/routes.md
 
 ### /gw/v1/routes
 handler: dashboard.gateway.build_gateway_router
-decides: static route table for GET /gw/v1/routes built by dashboard.gateway.build_route_view: model_id -> [go:upstream, nvidia:fallback] or [nvidia:upstream] (Go wins when an id is in both tables); no secrets, no go_state
+decides: static route table for GET /gw/v1/routes built by dashboard.gateway.build_route_view: model_id -> [go:upstream, nvidia:fallback] or [nvidia:upstream] (Go wins when an id is in both tables); the table itself carries no secrets and no go_state — the response envelope returns `go_state` alongside `routes`
 sibling traps: /gw/v1/messages, /gw/v1/models, /gw/v1/messages/count_tokens, /llm/v1/messages, /v1/messages
 topic: docs/atlas/routes.md
 
