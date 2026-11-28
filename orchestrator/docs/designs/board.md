@@ -160,7 +160,10 @@ Mandate stays the record, `create` only proves the question was answered. (atlas
   - Records `reviewed_sha` = `git -C <worktree> rev-parse HEAD`, both inputs' sha256, cost =
     `tree.total_cost ?? cost`, effective verdict. Appending a round sets `invalidated_by` on every prior
     signoff. (Critic #3.)
-  - Recomputes `senior`: critic `SENIOR_REVIEW: needed`, or counted rounds > 2, or scope ∩ `guarded_paths`.
+  - Recomputes `senior`: critic `SENIOR_REVIEW: needed`, or counted rounds > 2, or a guarded path in the diff
+    from the scope fence's merge-base (`diffFrom` in scope-check.mjs, not the claim-time `base_sha`) against
+    HEAD — so a branch that merged or rebased onto the base ref diffs only its own changes; a conflict
+    resolution that edits a guarded path still counts.
 - **`signoff <id> --by critic|senior|human [--owner <s>] [--findings <path>]`** — requires ≥ 1 round.
   `critic`: latest round's effective verdict `APPROVED` or `APPROVED_FREE`; copies that round's
   `reviewed_sha`, `free`, `free_source`, model. `senior`: `--findings` (senior reply) must gate `APPROVED`;
@@ -170,14 +173,18 @@ Mandate stays the record, `create` only proves the question was answered. (atlas
 - **`ready <id> --owner <s>`** — refuses unless ALL: (1) worktree clean
   (`git status --porcelain --untracked-files=all` empty, ignoring a `node_modules` link); (2) HEAD = sha of the
   newest non-invalidated signoff; (3) that signoff is non-free, or a `human` signoff exists for the same sha;
-  (4) if `senior.required`, a non-invalidated `senior` or `human` signoff exists for that sha;
+  (4) if `senior.required`, a non-invalidated `senior` or `human` signoff exists for that sha, or
+      `--senior-skip "<reason>"` is given when every live senior reason starts with `critic:` (reason ≥ 20
+      chars, recorded on `senior.skipped` and cleared by the next round; guarded-path and counted-rounds
+      reasons can never be skipped);
   (5) every adapter gate has a result with `exit 0` at that sha; (6) every blast-radius entry whose `expect` ≠
   `unchanged` has a `test` path that exists in the worktree. Then: stage `ready`, release lock, print the
   wake-up line `READY <id> <branch> <sha> — board verify then train` for the orchestrator to peer-mail.
-- **`watch [--now <iso>]`** — for each `working` ticket: live if `assignment.worker.pid` is alive with the
-  recorded start time, or the worker `out_path`/`.events.jsonl` mtime, or the lock `owner.json` heartbeat, is
-  newer than `stale_minutes`. Not live on **two consecutive sweeps** ⇒ `blocked: stale` + lock removed. A sweep
-  whose gap since `.watch.json` > `stale_minutes` (laptop slept) only records. Never blocks while the pid lives.
+- **`watch [--now <iso>]`** — for each `working` ticket: live if `assignment.worker.pid` is alive via `sameStart`
+  (its process start is within 3 s of the recorded start time), or the worker `out_path`/`.events.jsonl` mtime,
+  or the lock `owner.json` heartbeat, is newer than `stale_minutes`. Not live on **two consecutive sweeps**
+  ⇒ `blocked: stale` + lock removed. A sweep whose gap since `.watch.json` > `stale_minutes` (laptop slept)
+  only records. Never blocks while the pid lives.
   (Critic #12, #13.)
 - **`status [--json]`** — one row per ticket `{id, stage, owner, age_min, rounds, cost, egm, signoff}`; a ticket
   file that fails to parse is listed as `CORRUPT` and skipped, never blocks other tickets. `quarantine <id>` moves

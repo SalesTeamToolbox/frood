@@ -459,6 +459,10 @@ topic: docs/atlas/desk.md
 handler: orchestrator/bin/board.mjs liveWorker() (ps start vs assignment.worker.started via sameStart, 3 s tolerance) and orchestrator/bin/board.mjs cmdReady() (senior rule: a paid senior or human signoff, or --senior-skip "<reason>" when every live senior reason starts with critic:)
 decides: a live worker whose ps start drifted 1-3 s stays live (more than 3 s is a recycled pid -> missed sweep); `ready` refuses without a paid senior/human signoff unless `--senior-skip` is given and every senior reason starts with `critic:` (reason >=20 chars), recording `senior.skipped.{by,reason,at,sha}`; a round recompute clears `skipped`. Guarded-path and counted-rounds reasons can never be skipped.
 
+### board: recomputeSenior diffs from the scope fence's merge-base
+handler: orchestrator/bin/board.mjs recomputeSenior() (diffFrom(wt, t.base_sha, "HEAD", adapter.base), with diffFrom exported from orchestrator/bin/scope-check.mjs; the declared scope's guarded paths via seniorFor() are unchanged)
+decides: guarded-path senior reasons come from the diff between the newest accepted merge-base of the branch with the adapter base ref (else base_sha itself) and HEAD, so guarded paths the base gained after base_sha no longer force senior on a branch that merged or rebased onto it; the ticket's own guarded-path edits, including a merge conflict resolution that touches one, still add `guarded path: <p>`; scope-based, critic and counted-rounds reasons unchanged
+
 ### oc-worker load-based slots
 handler: orchestrator/bin/slots.mjs (readSample, slotConfig, allowedSlots); orchestrator/bin/oc-worker.mjs acquireSlot; desk.mjs status header
 decides: how many workers may start now — fixed `WORKER_SLOTS=N` or dynamic `WORKER_SLOTS_MIN`..`WORKER_SLOTS_MAX` (2..10) from 5-minute machine load (/proc/pressure/cpu, /proc/loadavg, /proc/meminfo) via ORCH_PROC_ROOT; burst guard admits at most one slot above the floor per 20 s; opencode children nicened to 10 on non-Windows; decision log slot-decisions.log; the shared clear-state.json next to the slots holds machine-wide clear-since hysteresis so one process's not-clear resets everyone

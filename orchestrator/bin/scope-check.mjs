@@ -49,6 +49,8 @@ function git(repo, args) {
 // instead of the stale base_sha; a baseRef that lags the ticket base still falls back to `base`.
 // A missing or unresolvable baseRef, or a failed merge-base, diffs from `base` as before.
 // All git calls keep the existing timeout via the shared `git()` helper.
+// board.mjs recomputeSenior() diffs from this too, so a ticket branch that merged or rebased onto
+// the adapter base ref diffs only its own changes against guarded paths.
 function isAncestor(repo, a, b) {
   const anc = git(repo, ["merge-base", "--is-ancestor", a, b]);
   return !anc.error && anc.status === 0;
@@ -59,7 +61,7 @@ function mergeBase(repo, ref, sha) {
   const m = String(mb.stdout || "").trim();
   return m || null;
 }
-function diffFrom(repo, base, sha, baseRef) {
+export function diffFrom(repo, base, sha, baseRef) {
   if (!baseRef) return base;
   // Resolve sha to its full form once so the M == sha check below (a branch already
   // merged into the ref would diff empty and pass vacuously) works even if a caller
