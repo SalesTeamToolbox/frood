@@ -14,6 +14,12 @@
 // inject a fake proc root and a fake setPriority through runPass(), so no real
 // process is ever reniced by a test.
 //
+// SPIKE SAMPLING: each loop pass keeps the previous pass's pid->ticks map and,
+// when load1 >= 0.75*nproc or PSI some avg10 >= 20, logs the top-8 CPU consumers
+// (with agent root and repo) to <stateDir>/spikes.jsonl (rotated like the
+// priority-guard log). The sampler is pure (spikeSample) and never breaks or
+// slows a renice pass.
+//
 //   node agent-priority.mjs        loop forever (SIGTERM/SIGINT exit 0)
 //   node agent-priority.mjs --once one pass, print what it lowered
 //   any other arg                  exit 2 with usage
@@ -96,6 +102,9 @@ function readProc(procRoot, pidStr) {
   const rest = stat.slice(close + 2).trim().split(/\s+/);
   const ppid = Number(rest[1]);
   const nice = Number(rest[16]);
+  // stat fields 14 (utime) and 15 (stime) are rest[11] and rest[12] after the
+  // leading state field (field 3) that heads `rest`.
+  const ticks = (Number(rest[11] || 0) + Number(rest[12] || 0));
   let argv = [];
   try {
     argv = fs.readFileSync(path.join(procRoot, pidStr, "cmdline"), "utf8").split("\0").filter(Boolean);
@@ -109,13 +118,17 @@ function readProc(procRoot, pidStr) {
     exe = "";
   }
   let uid = null;
+  let rssKiB = null;
   try {
-    const m = fs.readFileSync(path.join(procRoot, pidStr, "status"), "utf8").match(/^Uid:\s+(\d+)/m);
+    const statusText = fs.readFileSync(path.join(procRoot, pidStr, "status"), "utf8");
+    const m = statusText.match(/^Uid:\s+(\d+)/m);
     if (m) uid = Number(m[1]);
+    const rss = statusText.match(/^VmRSS:\s+(\d+)/m);
+    if (rss) rssKiB = Number(rss[1]);
   } catch {
     uid = null;
   }
-  return { pid: Number(pidStr), ppid, comm, argv, exe, nice, uid };
+  return { pid: Number(pidStr), ppid, comm, argv, exe, nice, uid, ticks, rssKiB };
 }
 
 function gatherSnapshot(procRoot) {
@@ -189,8 +202,9 @@ export function runPass({ procRoot, setPriority = realSetPriority, uid = process
   let errors = 0;
   let roots = 0;
   let pids = 0;
+  let procs = null;
   try {
-    const procs = gatherSnapshot(root);
+    procs = gatherSnapshot(root);
     const rootPids = [];
     for (const p of procs.values()) {
       if (p.pid === GUARD_PID) continue;
@@ -244,7 +258,7 @@ export function runPass({ procRoot, setPriority = realSetPriority, uid = process
   } catch {
     // A pass never throws.
   }
-  return { lowered, eperm, errors, roots, pids, paused: false };
+  return { lowered, eperm, errors, roots, pids, procs, paused: false };
 }
 
 export function writePassLog(lowered, eperm, errors, roots) {
@@ -264,6 +278,90 @@ export function writePassLog(lowered, eperm, errors, roots) {
   }
 }
 
+// --- spike sampler ----------------------------------------------------------
+
+// Parse "some avg10 = N" (and variants like "full avg10") from /proc/pressure/cpu text.
+function psiSomeAvg10(text) {
+  const m = String(text || "").match(/\bsome\s+avg10=([0-9.]+)/);
+  return m ? Number(m[1]) : null;
+}
+
+// Pure spike detector. Returns null unless spiking.
+export function spikeSample({
+  procs,
+  prevTicks,
+  elapsedMs,
+  loadavgText,
+  psiCpuText,
+  nproc,
+  clkTck = 100,
+} = {}) {
+  const load1 = Number((loadavgText || "").split(/\s+/)[0] || 0);
+  const cpuSomeAvg10 = psiSomeAvg10(psiCpuText);
+  const spiking = load1 >= 0.75 * nproc || (cpuSomeAvg10 !== null && cpuSomeAvg10 >= 20);
+  if (!spiking || !prevTicks || elapsedMs <= 0) return null;
+
+  const sec = elapsedMs / 1000;
+  const top = [];
+  for (const [pid, p] of procs) {
+    const prev = prevTicks.get(pid);
+    const delta = p.ticks - (prev ?? 0);
+    if (delta <= 0) continue;
+    top.push({
+      pid,
+      comm: p.comm || "",
+      cmd: p.argv.join(" ").slice(0, 160),
+      rssMiB: p.rssKiB === null ? null : Math.round(p.rssKiB / 1024),
+      cpu: delta / clkTck / sec * 100,
+      agentRoot: null,
+      repo: null,
+    });
+  }
+  top.sort((a, b) => b.cpu - a.cpu);
+  top.length > 8 && (top.length = 8);
+  attachAgentRoots(procs, top);
+  return { load1, load5: null, cpuSomeAvg10, top };
+}
+
+// Agent root: nearest ancestor (by ppid chain) that isAgentRoot accepts.
+function agentRootOf(procs, pid) {
+  let cur = pid;
+  let seen = 0;
+  while (cur !== undefined && cur !== 0 && seen < 1000) {
+    const p = procs.get(cur);
+    if (p && isAgentRoot(p)) return { pid: cur, comm: p.comm };
+    cur = p ? p.ppid : 0;
+    seen += 1;
+  }
+  return null;
+}
+
+// Fill agentRoot for each top entry (and nothing else) from the procs map.
+function attachAgentRoots(procs, top) {
+  for (const entry of top) {
+    entry.agentRoot = agentRootOf(procs, entry.pid);
+  }
+}
+
+// Reduce readlink /proc/<pid>/cwd to the first path segment under $HOME/projects/,
+// else the full path.
+function repoFromCwd(pid) {
+  let cwd;
+  try {
+    cwd = fs.readlinkSync(path.join("/proc", String(pid), "cwd"));
+  } catch {
+    return null;
+  }
+  const home = process.env.HOME || "";
+  const prefix = `${home}/projects/`;
+  if (cwd.startsWith(prefix)) {
+    const rest = cwd.slice(prefix.length);
+    const seg = rest.split("/")[0];
+    return seg ? `${home}/projects/${seg}` : prefix;
+  }
+  return cwd;
+}
+
 // Module scope: the run loop's sleep timer and its resolver, so a signal can
 // interrupt the 15 s wait instead of stalling a `systemctl restart` behind it.
 // Pause-transition state: doPass prints `paused` once on entering pause and
@@ -271,6 +369,10 @@ export function writePassLog(lowered, eperm, errors, roots) {
 let sleepTimer = null;
 let sleepResolve = null;
 let lastPaused = false;
+// Spike sampler state: the previous pass's pid -> ticks map and its timestamp.
+// On the first pass there is no previous sample, so nothing is logged.
+let prevTicks = null;
+let prevTs = null;
 
 function doPass() {
   const result = runPass({
@@ -290,6 +392,50 @@ function doPass() {
   lastPaused = false;
   if (result.lowered > 0 || result.eperm > 0 || result.errors > 0) {
     writePassLog(result.lowered, result.eperm, result.errors, result.roots);
+  }
+  // --- spike sampler (loop only, never --once, never tests) ---
+  try {
+    const now = Date.now();
+    const elapsedMs = prevTs === null ? null : now - prevTs;
+    const loadavgText = os.loadavg().join(" ");
+    let psiCpuText = "";
+    try {
+      psiCpuText = fs.readFileSync("/proc/pressure/cpu", "utf8");
+    } catch {
+      psiCpuText = "";
+    }
+    const sample = spikeSample({
+      procs: result.procs,
+      prevTicks,
+      elapsedMs,
+      loadavgText,
+      psiCpuText,
+      nproc: os.cpus().length,
+    });
+    if (sample) {
+      attachAgentRoots(result.procs, sample.top);
+      const state = stateDir();
+      fs.mkdirSync(state, { recursive: true });
+      const spikes = path.join(state, "spikes.jsonl");
+      if (fs.existsSync(spikes)) {
+        try {
+          if (fs.statSync(spikes).size > LOG_MAX) fs.renameSync(spikes, spikes + ".1");
+        } catch {
+          // rotation is best-effort
+        }
+      }
+      for (const entry of sample.top) {
+        entry.repo = repoFromCwd(entry.pid);
+      }
+      fs.appendFileSync(
+        spikes,
+        JSON.stringify({ at: new Date().toISOString(), ...sample }) + "\n",
+      );
+    }
+    prevTicks = new Map(result.procs);
+    prevTs = now;
+  } catch {
+    // A sampler failure must never break or slow the renice pass.
   }
   return { paused: false, ...result };
 }

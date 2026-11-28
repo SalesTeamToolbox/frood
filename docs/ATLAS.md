@@ -562,12 +562,12 @@ decides: which tests the train runs for a ticket (python convention → board ti
 
 ### workstation priority guard
 handler: orchestrator/ops/workstation/agent-priority.mjs runPass (systemd user service, 15 s loop with an interruptible sleep — SIGTERM/SIGINT exit 0 within 2 s; --once)
-decides: which agent process trees are reniced to nice>=10 per thread — never lowers a nice value, never touches a non-agent tree, excludes the Claude desktop UI; paused/resumed is printed once per pause transition
+decides: which agent process trees are reniced to nice>=10 per thread — never lowers a nice value, never touches a non-agent tree, excludes the Claude desktop UI; paused/resumed is printed once per pause transition; each spiking pass logs the top-8 CPU consumers (agent root, repo) to <stateDir>/spikes.jsonl (rotated at LOG_MAX to .1)
 sibling traps: oc-worker load-based slots
 
 ### box-wide suite lock
 handler: orchestrator/ops/workstation/suite-lock.sh suite_lock_acquire / suite_lock_release
-decides: one pinned full suite at a time across every repo sharing one box-wide SUITE_LOCK_ROOT queue (arrival-order, heartbeat, two-read stale break, token-checked release); `suite_lock_acquire` fails fast (return 2, ERROR line) when the lock root cannot be placed (unset SUITE_LOCK_ROOT/HOME and no passwd home, or an unwritable root); the Makefile test recipe traps TERM/INT to kill its pytest child and release the lock (exit 143/130)
+decides: one pinned full suite at a time across every repo sharing one box-wide SUITE_LOCK_ROOT queue (arrival-order, heartbeat, two-read stale break, token-checked release); `suite_lock_acquire` fails fast (return 2, ERROR line) when the lock root cannot be placed (unset SUITE_LOCK_ROOT/HOME and no passwd home, or an unwritable root); the Makefile test recipe traps TERM/INT to kill its pytest child and release the lock (exit 143/130); every acquire/release/break/skip is appended to $SUITE_LOCK_DIR/history.jsonl (rotated at 1 MiB to .1)
 
 ## How to keep this map accurate
 

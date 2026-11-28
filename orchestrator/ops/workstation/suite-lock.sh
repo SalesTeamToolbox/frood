@@ -25,6 +25,10 @@
 #     across separate shells on Windows are not something to bet the queue on.
 #   - The caller takes the lock BEFORE creating its worktree, so a session killed while waiting
 #     leaves nothing behind: no stray worktree, and no FAIL receipt for a suite that never started.
+#   - HISTORY: every acquire/release/break/skip is appended as one JSON line to
+#     $SUITE_LOCK_DIR/history.jsonl (rotated at 1 MiB to .1), so load spikes can later be
+#     attributed to the suite run that held the lock. The history never fails, never prints,
+#     and never changes control flow — it is purely additive observability.
 #
 # SUITE_LOCK=0 skips it (loudly) for an emergency. The stale windows and poll interval are
 # overridable so tests can run the real code in seconds.
@@ -44,6 +48,8 @@ SUITE_LOCK_TICKET=""
 SUITE_LOCK_HELD=0
 SUITE_LOCK_BEAT_PID=""
 SUITE_LOCK_TOKEN=""     # unique per acquisition; written into held/owner so only its holder releases it
+SUITE_LOCK_SINCE=""     # epoch seconds the lock was taken; set at acquire, used for held_s
+SUITE_LOCK_TICKET_AT="" # epoch seconds the ticket was written; used for wait_s (wall seconds)
 
 # Seconds since PATH was last touched, or -1 when that cannot be read RIGHT NOW.
 #
@@ -72,10 +78,73 @@ _suite_lock_first() {  # oldest ticket; the glob expands sorted and tickets star
   done
 }
 
+# JSON-escape a value for embedding in a JSON string: backslash, double quote
+# and control characters become a space. Pure bash + sed, no jq/node/python.
+_suite_lock_json_escape() {
+  local s="$1"
+  s="${s//\\/ }"     # backslash -> space
+  s="${s//\"/ }"     # double quote -> space
+  s="$(printf '%s' "$s" | sed 's/[\x00-\x1f\x7f]/ /g')"
+  printf '%s' "$s"
+}
+
+# Append one JSON history line to $SUITE_LOCK_DIR/history.jsonl.
+#   _suite_lock_history <event> [key value ...]
+# Fields: at (UTC ISO, second precision), event, pid ($$), what (the label),
+# plus the extra key/value fields. Never fails, never prints, every write is
+# `2>/dev/null || true`; safe under `set -euo pipefail`.
+# Rotates history.jsonl to history.jsonl.1 when it is over 1 MiB before append.
+_suite_lock_history() {
+  local event="$1"
+  shift
+  local f="${SUITE_LOCK_DIR:-}/history.jsonl" now size esc what_escaped k v extras=""
+  [ -n "$SUITE_LOCK_DIR" ] || return 0
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo 0)"
+  # rotation before append
+  if [ -e "$f" ]; then
+    size="$(stat -c %s "$f" 2>/dev/null || echo 0)"
+    if [ "${size:-0}" -gt 1048576 ]; then
+      mv "$f" "$f.1" 2>/dev/null || true
+    fi
+  fi
+  # build extra JSON fields; integer values are emitted unquoted.
+  local first=1
+  while [ $# -gt 0 ]; do
+    k="$1"; v="${2:-}"; shift 2
+    if [ "$first" -eq 1 ]; then first=0; else extras="$extras,"; fi
+    case "$v" in
+      ''|*[!0-9]*) extras="${extras}\"${k}\":"\"$(_suite_lock_json_escape "$v")"\"" ;;
+      *) extras="${extras}\"${k}\":${v}" ;;
+    esac
+  done
+  what_escaped="$(_suite_lock_json_escape "${SUITE_LOCK_HISTORY_WHAT:-}")"
+  local sep=""
+  [ -n "$extras" ] && sep=","
+  printf '%s\n' "{\"at\":\"${now}\",\"event\":\"${event}\",\"pid\":$$,\"what\":\"${what_escaped}\"${sep}${extras}}" >> "$f" 2>/dev/null || true
+}
+
 suite_lock_acquire() {  # $1 = one line saying what is about to run, shown to anyone waiting behind it
   local what="${1:-a pinned suite}"
   local LC_ALL=C         # the "ahead of you" count walks the same sorted glob as _suite_lock_first
   if [ "${SUITE_LOCK:-1}" = "0" ]; then
+    # Resolve the lock root the same way the main path does, so history can be written.
+    if [ -n "${SUITE_LOCK_ROOT:-}" ]; then
+      SUITE_LOCK_DIR="$SUITE_LOCK_ROOT"
+    elif [ -n "${HOME:-}" ]; then
+      SUITE_LOCK_DIR="$HOME/.local/state/frood-workstation/suite-lock"
+    else
+      local phome=""
+      if command -v getent >/dev/null 2>&1; then
+        phome="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)" || phome=""
+      fi
+      if [ -n "$phome" ]; then
+        case "$phome" in
+          /*) SUITE_LOCK_DIR="$phome/.local/state/frood-workstation/suite-lock" ;;
+        esac
+      fi
+    fi
+    SUITE_LOCK_HISTORY_WHAT="$what"
+    _suite_lock_history skip
     echo "==> WARN: SUITE_LOCK=0 — running WITHOUT the box-wide suite lock. A concurrent run can fail this one."
     return 0
   fi
@@ -114,6 +183,7 @@ suite_lock_acquire() {  # $1 = one line saying what is about to run, shown to an
   fi
 
   SUITE_LOCK_TICKET="$q/$(date +%s%N)-$$"
+  SUITE_LOCK_TICKET_AT="$(date +%s)"
   if ! printf '%s\n' "$what" > "$SUITE_LOCK_TICKET" 2>/dev/null; then
     echo "==> suite lock: ERROR: cannot create $SUITE_LOCK_DIR: cannot write ticket" >&2
     rm -f "$SUITE_LOCK_TICKET"
@@ -156,7 +226,10 @@ suite_lock_acquire() {  # $1 = one line saying what is about to run, shown to an
           stale_reads=0
         fi
         if [ "$stale_reads" -ge 2 ]; then
-          echo "==> suite lock: breaking a stale lock (no heartbeat for ${SUITE_LOCK_STALE}s+): $(head -1 "$held/owner" 2>/dev/null)"
+          local blabel="$(head -1 "$held/owner" 2>/dev/null)"
+          SUITE_LOCK_HISTORY_WHAT="$blabel"
+          _suite_lock_history break-stale
+          echo "==> suite lock: breaking a stale lock (no heartbeat for ${SUITE_LOCK_STALE}s+): $blabel"
           rm -rf "$held"
           stale_reads=0
         fi
@@ -167,6 +240,8 @@ suite_lock_acquire() {  # $1 = one line saying what is about to run, shown to an
         stale_reads=0
         [ -n "$ownerless_since" ] || ownerless_since="$(date +%s)"
         if [ $(( $(date +%s) - ownerless_since )) -gt "$SUITE_LOCK_STALE" ]; then
+          SUITE_LOCK_HISTORY_WHAT=""
+          _suite_lock_history break-ownerless
           echo "==> suite lock: breaking a lock with no owner for ${SUITE_LOCK_STALE}s+ (its holder died before writing one)"
           rm -rf "$held"
           ownerless_since=""
@@ -184,6 +259,11 @@ suite_lock_acquire() {  # $1 = one line saying what is about to run, shown to an
       rm -f "$SUITE_LOCK_TICKET"
       SUITE_LOCK_TICKET=""
       SUITE_LOCK_HELD=1
+      SUITE_LOCK_SINCE="$(date +%s)"
+      local wait_s=$(( SUITE_LOCK_SINCE - SUITE_LOCK_TICKET_AT ))
+      [ "$wait_s" -lt 0 ] && wait_s=0
+      SUITE_LOCK_HISTORY_WHAT="$what"
+      _suite_lock_history acquire wait_s "$wait_s"
       # The heartbeat outlives nothing: it stops when this shell dies or the lock is released, and
       # its output goes nowhere so it cannot hold a caller's pipe open.
       # `|| true` because the caller runs under `set -e`, which a subshell inherits: one failed touch
@@ -229,7 +309,9 @@ suite_lock_release() {
   # (the safe side: at worst the next waiter clears it after the stale window, instead of two suites
   # running at once).
   if [ "$SUITE_LOCK_HELD" = "1" ] && [ -n "$SUITE_LOCK_DIR" ]; then
-    local held="$SUITE_LOCK_DIR/held" cur="" i
+    local held="$SUITE_LOCK_DIR/held" cur="" i held_s outcome
+    held_s=$(( $(date +%s) - ${SUITE_LOCK_SINCE:-0} ))
+    [ "$held_s" -lt 0 ] && held_s=0
     for i in 1 2 3; do
       cur="$(_suite_lock_token_of "$held")"
       [ -n "$cur" ] && break
@@ -238,11 +320,16 @@ suite_lock_release() {
     done
     if [ -n "$cur" ] && [ "$cur" = "$SUITE_LOCK_TOKEN" ]; then
       rm -rf "$held"
+      outcome=released
     elif [ -n "$cur" ]; then
       echo "==> suite lock: NOT releasing — the lock now belongs to: $(head -1 "$held/owner" 2>/dev/null)"
+      outcome=not-ours
     elif [ -d "$held" ]; then
       echo "==> suite lock: could not read the lock's owner; leaving it for the stale window to clear"
+      outcome=unreadable
     fi
+    SUITE_LOCK_HISTORY_WHAT="${SUITE_LOCK_HISTORY_WHAT:-a pinned suite}"
+    _suite_lock_history release held_s "$held_s" outcome "$outcome"
     SUITE_LOCK_HELD=0
   fi
   if [ -n "$SUITE_LOCK_TICKET" ]; then

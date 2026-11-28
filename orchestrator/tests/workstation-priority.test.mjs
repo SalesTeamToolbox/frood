@@ -5,7 +5,7 @@ import os from "os";
 import path from "path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
-import { runPass, writePassLog, realSetPriority } from "../ops/workstation/agent-priority.mjs";
+import { runPass, writePassLog, realSetPriority, spikeSample } from "../ops/workstation/agent-priority.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WORKSTATION = path.join(HERE, "..", "ops", "workstation");
@@ -599,4 +599,147 @@ test("loop: pause prints exactly once, resume exactly once on unpause", { timeou
   } finally {
     cleanup();
   }
+});
+
+// ----------------------------------------------------------- spikeSample unit tests
+
+function procEntry(pid, { comm, argv, exe, ppid = 1, ticks, rssKiB }) {
+  return { pid, ppid, comm, argv: argv || [], exe: exe || "", nice: 0, uid: ME, ticks, rssKiB };
+}
+
+function makeProcs(entries) {
+  const m = new Map();
+  for (const e of entries) m.set(e.pid, e);
+  return m;
+}
+
+test("spikeSample: under threshold returns null", () => {
+  const procs = makeProcs([
+    procEntry(1000, { comm: "foo", argv: ["foo"], ticks: 1000 }),
+  ]);
+  const prev = new Map([[1000, 500]]);
+  const s = spikeSample({
+    procs, prevTicks: prev, elapsedMs: 1000,
+    loadavgText: "1.00 2.00 3.00", psiCpuText: "some avg10=1.00", nproc: 10,
+  });
+  assert.equal(s, null);
+});
+
+test("spikeSample: over load1 returns top sorted by cpu", () => {
+  const procs = makeProcs([
+    procEntry(1000, { comm: "a", argv: ["a"], ticks: 2000 }),
+    procEntry(1001, { comm: "b", argv: ["b"], ticks: 3000 }),
+    procEntry(1002, { comm: "c", argv: ["c"], ticks: 1000 }),
+  ]);
+  const prev = new Map([[1000, 1000], [1001, 1000], [1002, 500]]);
+  const s = spikeSample({
+    procs, prevTicks: prev, elapsedMs: 1000,
+    loadavgText: "10.00 5.00 2.00", psiCpuText: "some avg10=1.00", nproc: 10,
+  });
+  assert.ok(s, "should be spiking under load1");
+  assert.equal(s.load1, 10);
+  assert.equal(s.top.length, 3);
+  // b: (3000-1000)/100/1*100 = 2000%; a: (2000-1000)/100/1*100 = 1000%; c: (1000-500)/100/1*100 = 500%
+  assert.equal(s.top[0].pid, 1001);
+  assert.equal(s.top[1].pid, 1000);
+  assert.equal(s.top[2].pid, 1002);
+  assert.ok(s.top[0].cpu > s.top[1].cpu);
+  assert.ok(s.top[1].cpu > s.top[2].cpu);
+});
+
+test("spikeSample: PSI avg10 alone triggers it", () => {
+  const procs = makeProcs([
+    procEntry(1000, { comm: "foo", argv: ["foo"], ticks: 2000 }),
+  ]);
+  const prev = new Map([[1000, 1000]]);
+  // load1 well below threshold, but PSI some avg10 = 25 >= 20
+  const s = spikeSample({
+    procs, prevTicks: prev, elapsedMs: 1000,
+    loadavgText: "0.50 0.50 0.50", psiCpuText: "some avg10=25.00", nproc: 10,
+  });
+  assert.ok(s, "PSI avg10 alone should trigger");
+  assert.equal(s.cpuSomeAvg10, 25);
+});
+
+test("spikeSample: agentRoot resolves through ppid chain", () => {
+  // 1000 is an agent root (claude), 1001 is its child (node), 1002 is 1001's child
+  const procs = makeProcs([
+    procEntry(1000, { comm: "claude", argv: ["claude"], exe: "/home/user/.config/Claude/claude-code/claude", ticks: 1000 }),
+    procEntry(1001, { comm: "node", argv: ["node", "vitest"], exe: "/usr/bin/node", ppid: 1000, ticks: 2000 }),
+    procEntry(1002, { comm: "node", argv: ["node", "worker"], exe: "/usr/bin/node", ppid: 1001, ticks: 3000 }),
+  ]);
+  const prev = new Map([[1000, 500], [1001, 500], [1002, 500]]);
+  const s = spikeSample({
+    procs, prevTicks: prev, elapsedMs: 1000,
+    loadavgText: "10.00 5.00 2.00", psiCpuText: "some avg10=1.00", nproc: 10,
+  });
+  assert.ok(s);
+  const top1002 = s.top.find((e) => e.pid === 1002);
+  assert.ok(top1002, "pid 1002 should be in top");
+  assert.deepEqual(top1002.agentRoot, { pid: 1000, comm: "claude" });
+});
+
+test("spikeSample: agentRoot is null when no ancestor is an agent root", () => {
+  const procs = makeProcs([
+    procEntry(1000, { comm: "foo", argv: ["foo"], exe: "/usr/bin/foo", ticks: 2000 }),
+  ]);
+  const prev = new Map([[1000, 1000]]);
+  const s = spikeSample({
+    procs, prevTicks: prev, elapsedMs: 1000,
+    loadavgText: "10.00 5.00 2.00", psiCpuText: "some avg10=1.00", nproc: 10,
+  });
+  assert.ok(s);
+  assert.equal(s.top[0].agentRoot, null);
+});
+
+test("spikeSample: cmd cap holds at 160 chars", () => {
+  const longArgv = ["node", "x".repeat(200)];
+  const procs = makeProcs([
+    procEntry(1000, { comm: "node", argv: longArgv, exe: "/usr/bin/node", ticks: 2000 }),
+  ]);
+  const prev = new Map([[1000, 1000]]);
+  const s = spikeSample({
+    procs, prevTicks: prev, elapsedMs: 1000,
+    loadavgText: "10.00 5.00 2.00", psiCpuText: "some avg10=1.00", nproc: 10,
+  });
+  assert.ok(s);
+  assert.ok(s.top[0].cmd.length <= 160, `cmd should be capped at 160, got ${s.top[0].cmd.length}`);
+  assert.ok(s.top[0].cmd.endsWith("x".repeat(200).slice(0, 160 - 5)), "cmd should contain the long arg (capped)");
+});
+
+test("spikeSample: no previous ticks returns null (first pass)", () => {
+  const procs = makeProcs([
+    procEntry(1000, { comm: "foo", argv: ["foo"], ticks: 2000 }),
+  ]);
+  const s = spikeSample({
+    procs, prevTicks: null, elapsedMs: 1000,
+    loadavgText: "10.00 5.00 2.00", psiCpuText: "some avg10=1.00", nproc: 10,
+  });
+  assert.equal(s, null, "first pass with no prevTicks returns null");
+});
+
+test("spikeSample: rssKiB converts to rssMiB", () => {
+  const procs = makeProcs([
+    procEntry(1000, { comm: "foo", argv: ["foo"], ticks: 2000, rssKiB: 102400 }),
+  ]);
+  const prev = new Map([[1000, 1000]]);
+  const s = spikeSample({
+    procs, prevTicks: prev, elapsedMs: 1000,
+    loadavgText: "10.00 5.00 2.00", psiCpuText: "some avg10=1.00", nproc: 10,
+  });
+  assert.ok(s);
+  assert.equal(s.top[0].rssMiB, 100, "102400 KiB -> 100 MiB");
+});
+
+test("spikeSample: null rssKiB yields null rssMiB", () => {
+  const procs = makeProcs([
+    procEntry(1000, { comm: "foo", argv: ["foo"], ticks: 2000, rssKiB: null }),
+  ]);
+  const prev = new Map([[1000, 1000]]);
+  const s = spikeSample({
+    procs, prevTicks: prev, elapsedMs: 1000,
+    loadavgText: "10.00 5.00 2.00", psiCpuText: "some avg10=1.00", nproc: 10,
+  });
+  assert.ok(s);
+  assert.equal(s.top[0].rssMiB, null);
 });
