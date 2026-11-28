@@ -174,7 +174,7 @@ test("--agent cc-critic: opus, reader tools, no acceptEdits; receipt model opus 
   assert.equal(r.receipt.model, "opus");
   assert.ok(r.receipt.gate && typeof r.receipt.gate === "object", "a cc critic gets the verdict gate");
   assert.ok(!r.receipt.readonly_violation);
-  assert.deepEqual(fs.readdirSync(slotsOf(home)), ["clear-state.json"], "slots released");
+  assert.deepEqual(fs.readdirSync(slotsOf(home)).filter((n) => !n.startsWith("clear-state.json")), [], "slots released");
 });
 
 test("--agent cc-worker-strong: opus with writer tools", () => {

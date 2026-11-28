@@ -1,5 +1,6 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -946,3 +947,296 @@ test("pendingEscalations drops a closed/shipped board ticket's escalation", () =
   assert.match(r2.stdout, /escalations pending: 1/);
   assert.match(r2.stdout, /run:t9\/worker-r1:done blocked/);
 });
+
+// ---------------------------------------------------------------- session-driven guard (desk-live-guard)
+
+const mkBoardTicket = (h, slug, over = {}) => {
+  const repo = path.join(h, "boardrepo");
+  fs.mkdirSync(path.join(repo, ".opencode", "board", "tickets"), { recursive: true });
+  const t = { id: slug, stage: "working", rounds: [], signoffs: [], reopens: [], ...over };
+  fs.writeFileSync(path.join(repo, ".opencode", "board", "tickets", `${slug}.json`), JSON.stringify(t));
+  return repo;
+};
+const withDriver = (h, slug, driver) => {
+  const tp = path.join(h, "reports", slug, "ticket.json");
+  fs.writeFileSync(tp, JSON.stringify({ ...JSON.parse(fs.readFileSync(tp, "utf8")), driver }));
+};
+const restoreEnv = (saved, keys) => {
+  for (const k of keys) {
+    if (saved[k] === undefined) delete process.env[k];
+    else process.env[k] = saved[k];
+  }
+};
+
+test("session-driven (driver=session): a worker run-done is not dispatched to a critic", async () => {
+  const h = home();
+  mkStream(h);
+  mkTicket(h);
+  withDriver(h, "t1", "session");
+  const out = path.join(h, "reports", "t1", "worker-r1.md");
+  fs.writeFileSync(out, "done\n");
+  inHome(h, () => {
+    appendEvent("m6a", evQ("t1/worker-r1", out, path.join(h, "reports", "t1", "ticket.json")));
+    appendEvent("m6a", evDone("t1/worker-r1", out));
+  });
+  const saved = { ...process.env };
+  Object.assign(process.env, DRY);
+  try {
+    const first = await inHome(h, () => driveOnce({ lastPoll: null, printed: new Set() }, {}));
+    assert.equal(first.length, 1);
+    assert.equal(first[0].outcome, "session-driven", JSON.stringify(first));
+    assert.match(first[0].detail, /driver=session/);
+    // No spawn, no page, no ack: no findings file, no escalation, and the decision ack stays unresolved
+    assert.ok(!fs.existsSync(path.join(h, "reports", "t1", "findings-r1.md")), "no critic findings written");
+    assert.ok(!fs.existsSync(path.join(h, "reports", "t1", "critic-prompt-r1.md")), "no critic prompt written");
+    const lines = inHome(h, () => readAckLines("m6a"));
+    assert.ok(lines.some((l) => l.key === "run:t1/worker-r1:done" && !l.resolved), "the decision stays for when the session lets go");
+    assert.ok(!lines.some((l) => l.key === "run:t1/worker-r1:done" && l.resolved), "nothing resolved");
+    assert.ok(!fs.existsSync(path.join(h, ".config", "orchestrator", "desk-daemon", "escalations.jsonl")), "no page");
+  } finally {
+    restoreEnv(saved, Object.keys(DRY));
+  }
+});
+
+test("session-driven (driver=session): a CHANGES_REQUESTED verdict is neither resumed nor merged", async () => {
+  const h = home();
+  mkStream(h);
+  mkTicket(h);
+  withDriver(h, "t1", "session");
+  const runDir = path.join(h, "reports", "t1");
+  const out = path.join(runDir, "worker-r1.md");
+  const findings = path.join(runDir, "findings-r1.md");
+  fs.writeFileSync(out, "done\n");
+  fs.writeFileSync(findings, "VERDICT: CHANGES_REQUESTED\nBLAST RADIUS:\n- x\n");
+  inHome(h, () => {
+    appendEvent("m6a", evQ("t1/worker-r1", out, path.join(runDir, "ticket.json")));
+    appendEvent("m6a", evDone("t1/worker-r1", out, "worker", { session: "ses_W1" }));
+    appendEvent("m6a", { key: "verdict:t1/worker-r1", kind: "verdict", run: "t1/worker-r1", at: at(), effective: "CHANGES_REQUESTED", senior: false, findings, reviewed_sha: "abc1234" });
+  });
+  const saved = { ...process.env };
+  Object.assign(process.env, DRY);
+  try {
+    const handled = await inHome(h, () => driveOnce({ lastPoll: null, printed: new Set() }, {}));
+    assert.equal(handled.length, 2);
+    for (const row of handled) assert.equal(row.outcome, "session-driven", JSON.stringify(handled));
+    assert.ok(!fs.existsSync(path.join(runDir, "worker-r2.md")), "no resume out");
+    assert.ok(!fs.existsSync(path.join(h, ".config", "orchestrator", "desk-daemon", "escalations.jsonl")), "no page");
+  } finally {
+    restoreEnv(saved, Object.keys(DRY));
+  }
+});
+
+test("session-driven (native-critic round): no desk critic and no sweepVerdicts verdict", async () => {
+  const h = home();
+  mkStream(h);
+  const runDir = path.join(h, "reports", "t1");
+  fs.mkdirSync(runDir, { recursive: true });
+  const findings = path.join(runDir, "findings-r1.md");
+  const content = "VERDICT: APPROVED\nBLAST RADIUS:\n- none\n";
+  fs.writeFileSync(findings, content);
+  const sha = crypto.createHash("sha256").update(content).digest("hex");
+  const repo = mkBoardTicket(h, "t1", {
+    rounds: [{
+      n: 1, at: at(), counted: true, worker: { outcome: "done" },
+      critic: { source: "native", alias: "sonnet", model: "sonnet", free: false, free_source: "native:sonnet", critic_verdict: "APPROVED", effective: "APPROVED", reasons: [], findings_sha256: sha, receipt_sha256: null },
+      reviewed_sha: "abc", cost: 0, senior_needed: false,
+    }],
+  });
+  mkTicket(h, "t1", { repo }); // no driver field: the native round alone drives the guard
+  const out = path.join(runDir, "worker-r1.md");
+  fs.writeFileSync(out, "done\n");
+  inHome(h, () => {
+    appendEvent("m6a", evQ("t1/worker-r1", out, path.join(runDir, "ticket.json"), "worker"));
+    appendEvent("m6a", evDone("t1/worker-r1", out, "worker"));
+    appendEvent("m6a", evQ("t1/findings-r1", findings, path.join(runDir, "ticket.json"), "critic"));
+    appendEvent("m6a", evDone("t1/findings-r1", findings, "critic"));
+  });
+  const saved = { ...process.env };
+  Object.assign(process.env, { ORCH_NO_NOTIFY: "1" }); // not dry: prove no spawn happens even live
+  try {
+    const handled = await inHome(h, () => driveOnce({ lastPoll: null, printed: new Set() }, {}));
+    const byKey = Object.fromEntries(handled.map((r) => [r.key, r.outcome]));
+    assert.equal(byKey["run:t1/worker-r1:done"], "session-driven", JSON.stringify(handled));
+    assert.equal(byKey["run:t1/findings-r1:done"], "session-driven", JSON.stringify(handled));
+    assert.ok(!fs.existsSync(path.join(runDir, "findings-r2.md")), "no desk critic findings");
+    assert.ok(!fs.existsSync(path.join(runDir, "critic-prompt-r2.md")), "no desk critic prompt");
+    const keys = inHome(h, () => readEvents("m6a").map((e) => e.key));
+    assert.ok(!keys.some((k) => k.startsWith("verdict:t1/findings-r1")), "no sweepVerdicts verdict");
+  } finally {
+    restoreEnv(saved, ["ORCH_NO_NOTIFY"]);
+  }
+});
+
+test("held --by cc with a live held_session is still desk-driven (no driver, no native round)", async () => {
+  const h = home();
+  mkStream(h);
+  const sp = path.join(sdir(h), "m6a.json");
+  fs.writeFileSync(sp, JSON.stringify({ ...JSON.parse(fs.readFileSync(sp, "utf8")), held_by: "cc", held_session: "ses_live" }));
+  mkTicket(h); // repo "" and no driver field: the claim alone must not stop the desk
+  const out = path.join(h, "reports", "t1", "worker-r1.md");
+  fs.writeFileSync(out, "done\n");
+  inHome(h, () => {
+    appendEvent("m6a", evQ("t1/worker-r1", out, path.join(h, "reports", "t1", "ticket.json")));
+    appendEvent("m6a", evDone("t1/worker-r1", out));
+  });
+  const saved = { ...process.env };
+  Object.assign(process.env, DRY);
+  try {
+    const first = await inHome(h, () => driveOnce({ lastPoll: null, printed: new Set() }, { by: "cc" }));
+    assert.equal(first.length, 1);
+    assert.equal(first[0].outcome, "critic", JSON.stringify(first));
+    assert.match(first[0].line, /^critic r1/);
+  } finally {
+    restoreEnv(saved, Object.keys(DRY));
+  }
+});
+
+test("unheld stream with a live assignment.session is still desk-driven", async () => {
+  const h = home();
+  mkStream(h);
+  const repo = mkBoardTicket(h, "t1", { assignment: { session: "ses_live", owner: "o" } });
+  mkTicket(h, "t1", { repo }); // no driver field, no rounds: assignment.session must not stop the desk
+  const out = path.join(h, "reports", "t1", "worker-r1.md");
+  fs.writeFileSync(out, "done\n");
+  inHome(h, () => {
+    appendEvent("m6a", evQ("t1/worker-r1", out, path.join(h, "reports", "t1", "ticket.json")));
+    appendEvent("m6a", evDone("t1/worker-r1", out));
+  });
+  const saved = { ...process.env };
+  Object.assign(process.env, DRY);
+  try {
+    const first = await inHome(h, () => driveOnce({ lastPoll: null, printed: new Set() }, {}));
+    assert.equal(first.length, 1);
+    assert.equal(first[0].outcome, "critic", JSON.stringify(first));
+  } finally {
+    restoreEnv(saved, Object.keys(DRY));
+  }
+});
+
+test("doCritic refuses a findings path the board already hashed", async () => {
+  const h = home();
+  mkStream(h);
+  const runDir = path.join(h, "reports", "t1");
+  fs.mkdirSync(runDir, { recursive: true });
+  const findings = path.join(runDir, "findings-r1.md");
+  const content = "VERDICT: APPROVED\nBLAST RADIUS:\n- none\n";
+  fs.writeFileSync(findings, content);
+  const sha = crypto.createHash("sha256").update(content).digest("hex");
+  const repo = mkBoardTicket(h, "t1", {
+    rounds: [{
+      n: 1, at: at(), counted: true, worker: { outcome: "done" },
+      critic: { source: "receipt", alias: "critic", model: "m", free: true, free_source: "agent:critic", critic_verdict: "APPROVED", effective: "APPROVED", reasons: [], findings_sha256: sha, receipt_sha256: null },
+      reviewed_sha: "abc", cost: 0, senior_needed: false,
+    }],
+  });
+  mkTicket(h, "t1", { repo });
+  const out = path.join(runDir, "worker-r1.md");
+  const tp = path.join(runDir, "ticket.json");
+  fs.writeFileSync(out, "done\n");
+  inHome(h, () => {
+    appendEvent("m6a", evQ("t1/worker-r1", out, tp));
+    appendEvent("m6a", evDone("t1/worker-r1", out));
+    // A stored r1 decision replays against a file the board has since hashed (the 2026-11-27
+    // shape: the session recorded the round itself, and the desk's replay must not overwrite it).
+    appendAck("m6a", "run:t1/worker-r1:done", `ACTION critic ${tp} ${out} ${findings} 1`, { ticket: "t1" });
+  });
+  const saved = { ...process.env };
+  Object.assign(process.env, DRY);
+  try {
+    // A stored decision replays through handleEvent (a stored ack leaves `unhandled`, so driveOnce
+    // would not re-emit it — the replay shape is a direct handleEvent, like the spawn-failed test).
+    const r = await inHome(h, () => handleEvent("m6a", "run:t1/worker-r1:done", undefined));
+    assert.equal(r.outcome, "findings-hashed", JSON.stringify(r));
+    assert.equal(fs.readFileSync(findings, "utf8"), content, "the hashed file is unchanged");
+    assert.ok(!fs.existsSync(path.join(runDir, "critic-prompt-r1.md")), "no critic prompt written");
+    assert.equal(escLines(h).length, 1);
+    assert.match(escLines(h)[0], /findings-hashed/);
+    const r2 = await inHome(h, () => handleEvent("m6a", "run:t1/worker-r1:done", undefined));
+    assert.equal(r2.outcome, "paged", "a replay of a paged key never re-pages");
+    assert.equal(escLines(h).length, 1, "page is once-only");
+  } finally {
+    restoreEnv(saved, Object.keys(DRY));
+  }
+});
+
+test("critic -alt retry refuses a board-hashed -alt target", { skip: process.platform === "win32" ? "POSIX stub" : false }, async () => {
+  const h = home();
+  mkStream(h);
+  const runDir = path.join(h, "reports", "t1");
+  fs.mkdirSync(runDir, { recursive: true });
+  const tp = path.join(runDir, "ticket.json");
+  const findings = path.join(runDir, "findings-r1.md");
+  fs.writeFileSync(findings, "critic crashed, no verdict\n");
+  const alt = path.join(runDir, "findings-r1-alt.md");
+  const altContent = "VERDICT: APPROVED\nBLAST RADIUS:\n- none\n";
+  fs.writeFileSync(alt, altContent);
+  const sha = crypto.createHash("sha256").update(altContent).digest("hex");
+  const repo = mkBoardTicket(h, "t1", {
+    rounds: [{
+      n: 1, at: at(), counted: true, worker: { outcome: "done" },
+      critic: { source: "receipt", alias: "critic", model: "m", free: true, free_source: "agent:critic", critic_verdict: "APPROVED", effective: "APPROVED", reasons: [], findings_sha256: sha, receipt_sha256: null },
+      reviewed_sha: "abc", cost: 0, senior_needed: false,
+    }],
+  });
+  mkTicket(h, "t1", { repo });
+  inHome(h, () => {
+    appendEvent("m6a", evQ("t1/findings-r1", findings, tp, "critic"));
+    appendEvent("m6a", evDone("t1/findings-r1", findings, "critic"));
+  });
+  const argvLog = path.join(h, "argv.log");
+  const stub = path.join(h, "stub-oc-worker.mjs");
+  fs.writeFileSync(stub, `import fs from "node:fs"; fs.appendFileSync(${JSON.stringify(argvLog)}, JSON.stringify(process.argv.slice(2)) + "\\n");\n`);
+  const keys = ["ORCH_NO_NOTIFY", "ORCH_AWAIT_QUEUED_MS", "ORCH_OC_WORKER"];
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  Object.assign(process.env, { ORCH_NO_NOTIFY: "1", ORCH_AWAIT_QUEUED_MS: "300", ORCH_OC_WORKER: stub });
+  const desk = await import(`../bin/desk.mjs?hashedalt=${Date.now()}`);
+  try {
+    const r = await inHome(h, async () => await desk.handleEvent("m6a", "run:t1/findings-r1:done", undefined));
+    assert.equal(r.outcome, "findings-hashed", JSON.stringify(r));
+    assert.ok(!fs.existsSync(argvLog), "no retry spawned");
+    assert.equal(escLines(h).length, 1);
+    assert.match(escLines(h)[0], /findings-hashed/);
+  } finally {
+    restoreEnv(saved, keys);
+  }
+});
+
+for (const [name, board] of [
+  ["ready", { stage: "ready" }],
+  ["shipped", { stage: "shipped" }],
+  ["signed-off", { stage: "working", signoffs: [{ by: "human", model: null, free: false, free_source: null, reviewed_sha: "abc1234", at: "2026-11-27T00:00:00.000Z", invalidated_by: null }] }],
+]) {
+  test(`doResume on a ${name} ticket does nothing (board-final)`, async () => {
+    const h = home();
+    mkStream(h);
+    const repo = mkBoardTicket(h, "t1", board);
+    mkTicket(h, "t1", { repo });
+    const runDir = path.join(h, "reports", "t1");
+    const out = path.join(runDir, "worker-r1.md");
+    const findings = path.join(runDir, "findings-r1.md");
+    fs.writeFileSync(out, "done\n");
+    inHome(h, () => {
+      appendEvent("m6a", evQ("t1/worker-r1", out, path.join(runDir, "ticket.json")));
+      appendEvent("m6a", evDone("t1/worker-r1", out, "worker", { session: "ses_W1" }));
+      appendEvent("m6a", { key: "verdict:t1/worker-r1", kind: "verdict", run: "t1/worker-r1", at: at(), effective: "CHANGES_REQUESTED", senior: false, findings, reviewed_sha: "abc1234" });
+    });
+    // Not dry: prove no spawn happens even live. The stub records any spawn that slips through.
+    const argvLog = path.join(h, "argv.log");
+    const stub = path.join(h, "stub-oc-worker.mjs");
+    fs.writeFileSync(stub, `import fs from "node:fs"; fs.appendFileSync(${JSON.stringify(argvLog)}, JSON.stringify(process.argv.slice(2)) + "\\n");\n`);
+    const keys = ["ORCH_NO_NOTIFY", "ORCH_AWAIT_QUEUED_MS", "ORCH_OC_WORKER"];
+    const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+    Object.assign(process.env, { ORCH_NO_NOTIFY: "1", ORCH_AWAIT_QUEUED_MS: "300", ORCH_OC_WORKER: stub });
+    const desk = await import(`../bin/desk.mjs?final-${name}=${Date.now()}`);
+    try {
+      const handled = await inHome(h, async () => await desk.driveOnce({ lastPoll: null, printed: new Set() }, {}));
+      assert.ok(handled.length >= 1, JSON.stringify(handled));
+      for (const row of handled) assert.equal(row.outcome, "board-final", JSON.stringify(handled));
+      assert.ok(!fs.existsSync(argvLog), "no worker resumed, no critic spawned");
+      assert.ok(!fs.existsSync(path.join(runDir, "worker-r2.md")), "no resume out written");
+      assert.ok(!fs.existsSync(path.join(h, ".config", "orchestrator", "desk-daemon", "escalations.jsonl")), "no page");
+    } finally {
+      restoreEnv(saved, keys);
+    }
+  });
+}
