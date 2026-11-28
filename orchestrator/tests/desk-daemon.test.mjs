@@ -1026,6 +1026,43 @@ test("session-driven (driver=session): a CHANGES_REQUESTED verdict is neither re
   }
 });
 
+test("session-driven (driver=session): an APPROVED verdict is session-driven, not merged", async () => {
+  const h = home();
+  mkStream(h);
+  mkTicket(h);
+  withDriver(h, "t1", "session");
+  const runDir = path.join(h, "reports", "t1");
+  const out = path.join(runDir, "worker-r1.md");
+  const findings = path.join(runDir, "findings-r1.md");
+  fs.writeFileSync(out, "done\n");
+  fs.writeFileSync(findings, "VERDICT: APPROVED\nBLAST RADIUS:\n- none\n");
+  inHome(h, () => {
+    appendEvent("m6a", evQ("t1/worker-r1", out, path.join(runDir, "ticket.json")));
+    appendEvent("m6a", evDone("t1/worker-r1", out, "worker", { session: "ses_W1" }));
+    appendEvent("m6a", { key: "verdict:t1/worker-r1", kind: "verdict", run: "t1/worker-r1", at: at(), effective: "APPROVED", senior: false, findings, reviewed_sha: "abc1234" });
+  });
+  const argvLog = path.join(h, "argv.log");
+  const stub = path.join(h, "stub-oc-worker.mjs");
+  fs.writeFileSync(stub, `import fs from "node:fs"; fs.appendFileSync(${JSON.stringify(argvLog)}, JSON.stringify(process.argv.slice(2)) + "\\n");\n`);
+  const keys = ["ORCH_NO_NOTIFY", "ORCH_AWAIT_QUEUED_MS", "ORCH_OC_WORKER"];
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  Object.assign(process.env, { ORCH_NO_NOTIFY: "1", ORCH_AWAIT_QUEUED_MS: "300", ORCH_OC_WORKER: stub });
+  const desk = await import(`../bin/desk.mjs?sessionmerge=${Date.now()}`);
+  try {
+    const r = await inHome(h, async () => await desk.handleEvent("m6a", "verdict:t1/worker-r1", undefined));
+    assert.equal(r.outcome, "session-driven", JSON.stringify(r));
+    assert.match(String(r.detail ?? ""), /driver=session/);
+    // No spawn, no merge of the branch, and the event left unhandled: the merge decision stays unresolved.
+    assert.ok(!fs.existsSync(argvLog), "no oc-worker spawn");
+    assert.ok(!fs.existsSync(path.join(runDir, "worker-r2.md")), "no resume out");
+    assert.ok(!fs.existsSync(path.join(h, ".config", "orchestrator", "desk-daemon", "escalations.jsonl")), "no page");
+    const lines = inHome(h, () => readAckLines("m6a"));
+    assert.ok(lines.some((l) => l.key === "verdict:t1/worker-r1" && !l.resolved), "the merge decision stays for the session");
+  } finally {
+    restoreEnv(saved, keys);
+  }
+});
+
 test("session-driven (native-critic round): no desk critic and no sweepVerdicts verdict", async () => {
   const h = home();
   mkStream(h);
@@ -1240,3 +1277,33 @@ for (const [name, board] of [
     }
   });
 }
+
+test("doCritic on a ready ticket is board-final", async () => {
+  const h = home();
+  mkStream(h);
+  const repo = mkBoardTicket(h, "t1", { stage: "ready" });
+  mkTicket(h, "t1", { repo });
+  const runDir = path.join(h, "reports", "t1");
+  const out = path.join(runDir, "worker-r1.md");
+  fs.writeFileSync(out, "done\n");
+  inHome(h, () => {
+    appendEvent("m6a", evQ("t1/worker-r1", out, path.join(runDir, "ticket.json")));
+    appendEvent("m6a", evDone("t1/worker-r1", out));
+  });
+  const argvLog = path.join(h, "argv.log");
+  const stub = path.join(h, "stub-oc-worker.mjs");
+  fs.writeFileSync(stub, `import fs from "node:fs"; fs.appendFileSync(${JSON.stringify(argvLog)}, JSON.stringify(process.argv.slice(2)) + "\\n");\n`);
+  const keys = ["ORCH_NO_NOTIFY", "ORCH_AWAIT_QUEUED_MS", "ORCH_OC_WORKER"];
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  Object.assign(process.env, { ORCH_NO_NOTIFY: "1", ORCH_AWAIT_QUEUED_MS: "300", ORCH_OC_WORKER: stub });
+  const desk = await import(`../bin/desk.mjs?criticfinal=${Date.now()}`);
+  try {
+    const r = await inHome(h, async () => await desk.handleEvent("m6a", "run:t1/worker-r1:done", undefined));
+    assert.equal(r.outcome, "board-final", JSON.stringify(r));
+    assert.ok(!fs.existsSync(argvLog), "no critic spawn");
+    assert.ok(!fs.existsSync(path.join(runDir, "critic-prompt-r1.md")), "no critic prompt written");
+    assert.ok(!fs.existsSync(path.join(h, ".config", "orchestrator", "desk-daemon", "escalations.jsonl")), "no page");
+  } finally {
+    restoreEnv(saved, keys);
+  }
+});

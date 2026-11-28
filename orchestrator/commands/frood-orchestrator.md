@@ -262,7 +262,7 @@ this session drives itself (its own critic and merge) gets `"driver": "session"`
    **One run dir = `dirname(mandate)`** (today `~/.opencode/reports/<effort>/<ticket>/`): `mandate.md`,
    `ticket.json`, `report.md`, `worker-r<N>.md` and `findings-r<N>.md` all live there. Write `ticket.json`
    once, before the first dispatch, and never change it, so `/frood-desk` can act on the run:
-   `{"ticket":"<slug>","worktree":"<abs>","branch":"<name>","base":"<ref>","mandate":"<abs>","report":"<abs>","max_rounds":3,"senior_trigger":null,"repo":"<abs main checkout>","merge":"ff|train"}`.
+   `{"ticket":"<slug>","worktree":"<abs>","branch":"<name>","base":"<ref>","mandate":"<abs>","report":"<abs>","max_rounds":3,"senior_trigger":null,"driver":null,"repo":"<abs main checkout>","merge":"ff|train"}`. `"session"` when this session drives the run itself (its own critic and merge); otherwise `null` or omitted.
    **Blast radius (required):** for every function/route/key/format the ticket changes, list its
    callers (`git grep`, send a `scout`) and the expected behaviour at each after the change —
    "unchanged" or exactly what changes. Never assert "no other module changes behaviour"; make it a
