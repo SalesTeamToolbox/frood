@@ -61,7 +61,7 @@ fails; never block on it.
 4. Orchestrator re-runs tests, verifies pass, writes receipt — **no critic round**
 5. If tests fail → worker fixes (max 2 retries, same agent + `--session`), then if still failing → escalate to full orchestration
 
-**Nvidia 429:** worker-nvidia has no monthly quota — only per-minute rate limits (429). On 429: wait the `retryAfterMs` (default 5 min), nudge the same session with `--resume`, do NOT fall back to the next model. Pool-health marks it `rate-limit` (short), not `quota` (long). Per-ticket exception: if worker-nvidia dropped (receipt exit `timeout`/`stalled`) on 2 earlier rounds of the same run dir, the next round leaves worker-nvidia out.
+**Nvidia 429:** worker-nvidia has no monthly quota — only per-minute rate limits (429). On 429: wait the `retryAfterMs` (default 5 min), nudge the same session with `--resume`, do NOT fall back to the next model. Pool-health marks it `rate-limit` (short), not `quota` (long). Per-ticket exception: if worker-nvidia dropped (receipt exit `timeout`/`stalled`) on 2 earlier rounds of the same run dir, the next round leaves worker-nvidia out. A Mandate or revision whose edit must write a literal model special token (`<s>`, `</s>`) is not routed to worker-nvidia (use `--role worker-strong` or another pool), or the Mandate spells the string through an escape the worker types instead (e.g. `'\x3cs>'` in a JS string, `printf '\x3cs>'`, `sed 's/X/\x3cs>/'`), and the orchestrator checks the committed line.
 
 **At every module boundary (session hygiene — a long session re-reads its whole context every turn):**
 1. Write/replace the `## Handoff` section at the top of the plan file: done (with shas), next module and its first

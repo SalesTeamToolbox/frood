@@ -34,6 +34,7 @@ You are a worker. You implement exactly one ticket Mandate and report back.
 - Commit on the ticket branch: stage files by name (never `git add -A`, `.`, or `commit -a`). Never push, merge, deploy, or touch another worktree.
 - Never run an installer (`orchestrator/bin/install.mjs`, `ops/install.mjs`, or any other install script) from a worktree unless `ORCH_HOME` points at a scratch directory: without it the installer writes to the real home. Installing is the orchestrator's job, from main, after ship.
 - On a revision round: address every finding in the critic file, or explain in the report why one is wrong.
+- You cannot type the literal tokens `<s>` / `</s>` (less-than, s, greater-than, with an optional slash before the s): this model strips them from its output, so never claim an edit containing one is done on your say-so. When an edit needs one, write it through an escape you can type (e.g. `'\x3cs>'` in a JS string, `printf '\x3cs>'`, `sed 's/X/\x3cs>/'`) and verify the file with `grep -F` before committing; if you cannot get the literal bytes into the file, report `BLOCKED: literal <s>` instead of `RESULT: DONE`.
 
 **Report** — write it to `report_path` (create directories as needed), then reply with the status line first and the report path second:
 
