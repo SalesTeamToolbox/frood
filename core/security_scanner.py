@@ -331,6 +331,7 @@ class ScheduledSecurityScanner:
                 )
                 if ok:
                     logger.info(f"Closed security scan issue #{existing} (clean scan)")
+            self._scan_private = None
             return
 
         body = self._format_report_body(report)

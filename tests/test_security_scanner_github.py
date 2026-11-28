@@ -298,17 +298,31 @@ class TestConstructorAndSettings:
     def test_frood_wires_settings(self, monkeypatch):
         from core.config import settings
 
-        object.__setattr__(settings, "security_scan_github_issues", False)
-        object.__setattr__(settings, "security_scan_interval", "6h")
-        object.__setattr__(settings, "security_scan_min_severity", "high")
+        # Settings is a frozen dataclass: set via object.__setattr__ and restore
+        # in finally so the singleton is not left mutated for later tests.
+        orig = {
+            name: getattr(settings, name)
+            for name in (
+                "security_scan_github_issues",
+                "security_scan_interval",
+                "security_scan_min_severity",
+            )
+        }
+        try:
+            object.__setattr__(settings, "security_scan_github_issues", False)
+            object.__setattr__(settings, "security_scan_interval", "6h")
+            object.__setattr__(settings, "security_scan_min_severity", "high")
 
-        from frood import Frood
+            from frood import Frood
 
-        frood = Frood()
-        sc = frood.security_scanner
-        assert sc._github_issues is False
-        assert sc._interval == 6 * 3600
-        assert sc._min_severity == "high"
+            frood = Frood()
+            sc = frood.security_scanner
+            assert sc._github_issues is False
+            assert sc._interval == 6 * 3600
+            assert sc._min_severity == "high"
+        finally:
+            for name, value in orig.items():
+                object.__setattr__(settings, name, value)
 
     @pytest.mark.asyncio
     async def test_create_issue_direct_on_public_repo_writes_nothing(self, monkeypatch, caplog):
@@ -317,6 +331,43 @@ class TestConstructorAndSettings:
         caplog.set_level(logging.DEBUG, logger="frood.security_scanner")
 
         scanner = ScheduledSecurityScanner(workspace_path="/tmp/wt")
+        ok = await scanner._create_issue("t", "b", ["security-scan"])
+        assert ok is False
+        assert mocker.issue_calls() == []
+
+    @pytest.mark.asyncio
+    async def test_clean_scan_resets_scan_private_direct_call_guarded_after(
+        self, monkeypatch, caplog
+    ):
+        """EGM note 4: direct write calls check for themselves after a scan.
+
+        A clean scan on a PRIVATE repo sets _scan_private=True; if the repo then
+        becomes PUBLIC, a direct _create_issue must still be blocked (no issue
+        create call, returns False).
+        """
+        mocker = SubprocessMocker()
+        mocker.responses["repo_view"] = (
+            0,
+            b'{"visibility": "PRIVATE", "nameWithOwner": "owner/repo"}',
+            b"",
+        )
+        mocker.responses["issue_list"] = (0, b"[]", b"")
+        _patch_subprocess(monkeypatch, mocker)
+        caplog.set_level(logging.DEBUG, logger="frood.security_scanner")
+
+        scanner = ScheduledSecurityScanner(workspace_path="/tmp/wt")
+        scanner._github_issues = True
+        # Clean scan on a PRIVATE repo — closes nothing; _scan_private is reset
+        # after the scan so direct calls check for themselves.
+        await scanner._report_to_github(_make_report(total=0))
+
+        # Repo flips to PUBLIC; direct _create_issue must fail closed.
+        mocker.responses["repo_view"] = (
+            0,
+            b'{"visibility": "PUBLIC", "nameWithOwner": "owner/repo"}',
+            b"",
+        )
+        mocker.calls.clear()
         ok = await scanner._create_issue("t", "b", ["security-scan"])
         assert ok is False
         assert mocker.issue_calls() == []
