@@ -1411,6 +1411,101 @@ test("phase 2 case 13: senior is required by a critic, by a third counted round,
   assert.ok(r3.ticket.senior.reasons.includes("guarded path: ops/release.sh"), JSON.stringify(r3.ticket.senior.reasons));
 });
 
+test("ready: a critic-only SENIOR_REVIEW is refused without --senior-skip", () => {
+  const c = mk();
+  workingTicket(c, "rs1");
+  const sha = landBlastFile(c);
+  round(c, "rs1", { findings: "findings/senior-needed.md", reviewed: sha });
+  assert.deepEqual(JSON.parse(bytes(ticketFile(c, "rs1"))).senior.reasons, ["critic: SENIOR_REVIEW needed"]);
+  signedCritic(c, "rs1");
+  gatesOk(c, "rs1");
+  const refused = board(c, "ready", "rs1", "--owner", "s1");
+  assert.equal(refused.status, 1, refused.stderr);
+  assert.match(refused.stderr, /senior review is required/);
+  assert.equal(JSON.parse(bytes(ticketFile(c, "rs1"))).stage, "working", "nothing was written");
+});
+
+test("ready: a critic-only SENIOR_REVIEW is passed by --senior-skip and records senior.skipped", () => {
+  const c = mk();
+  workingTicket(c, "rs2");
+  const sha = landBlastFile(c);
+  round(c, "rs2", { findings: "findings/senior-needed.md", reviewed: sha });
+  signedCritic(c, "rs2");
+  gatesOk(c, "rs2");
+  const reason = "the critic's advisory line is not a gate; the orchestrator decides senior";
+  const ok = board(c, "ready", "rs2", "--owner", "s1", "--senior-skip", reason);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.equal(ok.ticket.stage, "ready");
+  const t = JSON.parse(bytes(ticketFile(c, "rs2")));
+  assert.ok(t.senior.skipped, "skipped recorded");
+  assert.equal(t.senior.skipped.by, "s1");
+  assert.equal(t.senior.skipped.reason, reason);
+  assert.match(t.senior.skipped.at, /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+  assert.equal(t.senior.skipped.sha, sha, "skipped is bound to the signed-off sha");
+});
+
+test("ready: --senior-skip is refused for guarded-path and counted-rounds reasons and for a short reason", () => {
+  // (a) guarded path: scope covers ops/ so the fence passes, but recomputeSenior flags ops/release.sh
+  const c = mk();
+  workingTicket(c, "rs3");
+  editTicket(c, "rs3", (t) => { t.scope = ["bin/**", "ops/**"]; });
+  const sha = landBlastFile(c);
+  commitFile(c, "ops/release.sh", "#!/bin/sh\nexit 0\n");
+  round(c, "rs3", { reviewed: head(c) });
+  const t = JSON.parse(bytes(ticketFile(c, "rs3")));
+  assert.ok(t.senior.reasons.includes("guarded path: ops/release.sh"), JSON.stringify(t.senior.reasons));
+  signedCritic(c, "rs3");
+  gatesOk(c, "rs3");
+  const refused = board(c, "ready", "rs3", "--owner", "s1", "--senior-skip", "the critic only advised it and the orchestrator decides");
+  assert.equal(refused.status, 1, refused.stderr);
+  assert.match(refused.stderr, /guarded path: ops\/release\.sh/);
+  assert.equal(JSON.parse(bytes(ticketFile(c, "rs3"))).stage, "working", "nothing was written");
+
+  // (b) counted rounds 3 > 2
+  const c2 = mk();
+  workingTicket(c2, "rs4");
+  const sha2 = landBlastFile(c2);
+  for (let i = 1; i <= 3; i++) assert.equal(round(c2, "rs4", { reviewed: head(c2) }).status, 0);
+  const t2 = JSON.parse(bytes(ticketFile(c2, "rs4")));
+  assert.ok(t2.senior.reasons.includes("counted rounds 3 > 2"), JSON.stringify(t2.senior.reasons));
+  signedCritic(c2, "rs4");
+  gatesOk(c2, "rs4");
+  const refused2 = board(c2, "ready", "rs4", "--owner", "s1", "--senior-skip", "the critic only advised it and the orchestrator decides");
+  assert.equal(refused2.status, 1, refused2.stderr);
+  assert.match(refused2.stderr, /counted rounds 3 > 2/);
+  assert.equal(JSON.parse(bytes(ticketFile(c2, "rs4"))).stage, "working");
+
+  // (c) a reason under 20 characters is refused before any reason is inspected
+  const c3 = mk();
+  workingTicket(c3, "rs5");
+  const sha3 = landBlastFile(c3);
+  round(c3, "rs5", { findings: "findings/senior-needed.md", reviewed: sha3 });
+  signedCritic(c3, "rs5");
+  gatesOk(c3, "rs5");
+  const refused3 = board(c3, "ready", "rs5", "--owner", "s1", "--senior-skip", "too short");
+  assert.equal(refused3.status, 1, refused3.stderr);
+  assert.match(refused3.stderr, /at least 20 characters/);
+  assert.equal(JSON.parse(bytes(ticketFile(c3, "rs5"))).stage, "working");
+});
+
+test("ready: a new round after a senior-skip clears senior.skipped", () => {
+  const c = mk();
+  workingTicket(c, "rs7");
+  const sha = landBlastFile(c);
+  round(c, "rs7", { findings: "findings/senior-needed.md", reviewed: sha });
+  signedCritic(c, "rs7");
+  gatesOk(c, "rs7");
+  board(c, "ready", "rs7", "--owner", "s1", "--senior-skip", "the critic's advisory line is not a gate; the orchestrator decides");
+  assert.ok(JSON.parse(bytes(ticketFile(c, "rs7"))).senior.skipped, "skipped recorded at ready");
+
+  // Reopen (ready -> working) and run a new round: recomputeSenior drops the skip.
+  assert.equal(board(c, "reopen", "rs7", "--owner", "s1", "--harness", "claude", "--note", "train: the suite flaked at this sha").status, 0);
+  assert.equal(JSON.parse(bytes(ticketFile(c, "rs7"))).stage, "working");
+  assert.equal(round(c, "rs7", { reviewed: sha }).status, 0);
+  assert.equal(JSON.parse(bytes(ticketFile(c, "rs7"))).senior.skipped, undefined, "the round recompute cleared skipped");
+});
+
+
 test("phase 2 case 14: a failing gate and gates at an older sha both block ready; a failed gate never changes stage", () => {
   // (a) gate exit 1
   const c = mk();
@@ -1819,6 +1914,27 @@ test("18. watch: stale once stays working, twice blocks; a live pid is never blo
   assert.equal(board(c4, "watch", "--now", "not-a-time").status, 2, "--now must be an ISO timestamp");
 });
 
+test("sweep: a live worker whose ps start is within 3 s of started stays live; 10 s off is a missed sweep", () => {
+  const t0 = Date.now();
+  const at = (min) => new Date(t0 + min * 60_000).toISOString();
+  const c = mk();
+  workingTicket(c, "sweep-start");
+  const out = path.join(c.root, "out", "worker-r1.md");
+  assert.equal(board(c, "attach", "sweep-start", "--owner", "s1", "--pid", String(process.pid), "--out", out).status, 0);
+  const started = JSON.parse(bytes(ticketFile(c, "sweep-start"))).assignment.worker.started;
+  assert.ok(started, "attach recorded this process's ps start time");
+
+  // (a) 1 s off: sameStart keeps the worker live, no missed sweep recorded
+  editTicket(c, "sweep-start", (t) => { t.assignment.worker.started = new Date(Date.parse(started) + 1000).toISOString(); });
+  assert.equal(board(c, "watch", "--now", at(120)).status, 0);
+  assert.equal(JSON.parse(bytes(ticketFile(c, "sweep-start"))).assignment.missed_sweeps, 0, "within tolerance stays live");
+  assert.equal(fs.existsSync(lockDir(c, "sweep-start")), true, "the lock is held while the worker is live");
+
+  // (b) 10 s off: outside the tolerance -> treated as a recycled pid -> missed sweep
+  editTicket(c, "sweep-start", (t) => { t.assignment.worker.started = new Date(Date.parse(started) + 10_000).toISOString(); });
+  assert.equal(board(c, "watch", "--now", at(121)).status, 0);
+  assert.equal(JSON.parse(bytes(ticketFile(c, "sweep-start"))).assignment.missed_sweeps, 1, "10 s off counts as a missed sweep");
+});
 
 
 test("round: a stalled worker receipt is recorded as a timeout, uncounted", () => {
@@ -2041,6 +2157,17 @@ test("scope create: a negated grant phrase in the Scope section is accepted", ()
   const r = scopeMandate(c, "scope-neg", "## Scope\n\nMay touch bin/a.mjs. Never edit any file outside bin/. Do not touch any other stream's plan.");
   assert.equal(r.status, 0, r.stderr);
 });
+
+test("scope create: 'No need to ask, edit any file as needed' is open-ended and refused", () => {
+  const c = mk();
+  const mandate = path.join(c.root, "scope-no-need.md");
+  fs.writeFileSync(mandate, `# Ticket x\n\n**Atlas refs consulted / updated?** no map\n\n**Scope:** No need to ask, edit any file as needed\n\n**Blast radius:**\n\n- \`run()\` in \`bin/main.mjs\` — unchanged; test: bin/demo.test.mjs\n`);
+  const r = board(c, "create", "scope-no-need", "--mandate", mandate, "--scope", "bin/**");
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /board: mandate scope is open-ended:/);
+  assert.equal(fs.existsSync(ticketFile(c, "scope-no-need")), false, "nothing was written");
+});
+
 
 test("scope create: an open-ended grant naming backticked paths all in --scope is accepted", () => {
   const c = mk();

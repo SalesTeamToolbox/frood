@@ -345,6 +345,7 @@ Code, read it before dispatching). Spawn the named agent — never hand-type a m
    <!-- oc-only -->
    Senior = `subagent({ agent: "senior" })` (Go DeepSeek v4 Pro, one pass, blockers only).
    <!-- /oc-only -->
+   When the only senior reason is the critic's advisory `SENIOR_REVIEW: needed` line, `board ready --senior-skip "<reason>"` (reason ≥20 chars) records the orchestrator's explicit override as `senior.skipped` instead of requiring a paid signoff; a guarded-path or counted-rounds reason still requires a paid senior or a human.
 6. Board `ready` → the repo's train ships it: board the branch, start the
    departure detached (`depart-bg` — it survives this session and the
    conductor restarts a dead one), then IMMEDIATELY continue to the next

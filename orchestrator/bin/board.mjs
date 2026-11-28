@@ -26,7 +26,7 @@
 //                       (--critic-receipt <path> | --native-critic sonnet|haiku|opus)
 //   signoff <id> --by critic|senior|human [--owner <s>]
 //   signoff <id> --by senior --owner <s> --findings <path> (--receipt <path> | --native <alias>)
-//   gates <id> --owner <s>       |   ready <id> --owner <s>
+//   gates <id> --owner <s>       |   ready <id> --owner  [--senior-skip "<reason>"]   (only when every senior reason starts with `critic:`)<s>
 //   verify <id> --sha <sha>      |   shipped <id> --sha <sha>
 //   reopen <id> --owner <s> --harness claude|opencode --note <why> [--worktree <path>]
 //          (ready -> working after the train refused the sha: every live signoff is invalidated, the round cap
@@ -75,6 +75,7 @@ import { fileURLToPath } from "node:url";
 import { gate } from "./verdict-gate.mjs";
 import { agentModel, isPolicyFree } from "./pool-health.mjs";
 import { matchAny, DENY, checkScope } from "./scope-check.mjs";
+import { sameStart } from "./proc-tree.mjs"; // process-start identity with a 3 s tolerance (design B7)
 class Refuse extends Error {} // exit 1: a rule said no, nothing was written
 class Usage extends Error {} // exit 2: usage, schema, or missing file
 class Conflict extends Error {} // exit 3: lock contention or epoch conflict — retry
@@ -311,7 +312,7 @@ const TICKET_RULES = [
   ["signoffs", isArr, "an array"],
   ["gates", isArr, "an array"],
   ["history", isArr, "an array"],
-  ["senior", (v) => v && isBool(v.required) && isArr(v.reasons), "{required, reasons}"],
+  ["senior", (v) => v && isBool(v.required) && isArr(v.reasons) && (v.skipped === undefined || isObjOrNull(v.skipped)), "{required, reasons, skipped?}"],
   ["created", isIso, TS],
   ["updated", isIso, TS],
 ];
@@ -724,7 +725,7 @@ function mandateScopeSentences(mand) {
 // A grant phrase is negated when its clause (the text since the last ";" before
 // it) carries a negation: "never edit any file outside X", "May not touch: … any
 // other file" restrict the worker, they do not grant anything.
-const NEGATION = /\b(never|not|no|nor|cannot|without)\b|n't\b/;
+const NEGATION = /\b(never|do not|don't|may not|must not|cannot)\b|n't\b/;
 function grantsOpenEnded(lower) {
   for (const phrase of OPEN_ENDED_SCOPE) {
     for (let i = lower.indexOf(phrase); i >= 0; i = lower.indexOf(phrase, i + 1)) {
@@ -1340,7 +1341,20 @@ function cmdReady(ctx, id) {
       (s) => (s.by === "senior" || s.by === "human") && !s.free && s.reviewed_sha === sig.reviewed_sha,
     );
     if (t.senior.required && !seniorSameSha) {
-      throw new Refuse(`senior review is required (${t.senior.reasons.join("; ")}) — a paid senior or a human must sign this sha`);
+      // --senior-skip is an explicit, recorded override for the one senior trigger that comes from reading
+      // the diff (a critic's `critic: SENIOR_REVIEW needed` line). It is allowed only when every live senior
+      // reason starts with `critic:`; a guarded-path or counted-rounds reason still needs a paid senior or a
+      // human. Without the flag, behaviour is unchanged.
+      const skip = text(o, "senior-skip");
+      if (!skip) {
+        throw new Refuse(`senior review is required (${t.senior.reasons.join("; ")}) — a paid senior or a human must sign this sha`);
+      }
+      if (skip.length < 20) throw new Refuse("--senior-skip needs a reason of at least 20 characters");
+      const nonSkippable = t.senior.reasons.filter((r) => !r.startsWith("critic:"));
+      if (nonSkippable.length) {
+        throw new Refuse(`--senior-skip cannot override: ${nonSkippable.join("; ")}`);
+      }
+      t.senior.skipped = { by: owner, reason: skip, at: now(), sha: sig.reviewed_sha };
     }
     for (const argv of ctx.adapter.gates) {
       const ok = t.gates.find((g) => isArr(g.argv) && g.argv.join("\0") === argv.join("\0") && g.sha === sig.reviewed_sha && g.exit === 0);
@@ -1529,8 +1543,10 @@ function liveWorker(root, t, adapter, nowMs) {
   if (w && Number.isInteger(w.pid) && w.pid > 0 && alive(w.pid)) {
     const cur = workerStart(w.pid);
     // A recycled pid started at a different time and is not this worker. Both reads go through the same clock
-    // and formatting, so `started` (attach) and `cur` (now) are equal for the same process.
-    if (!cur || !w.started || cur === w.started) return true;
+    // and formatting, so `started` (attach) and `cur` (now) are equal for the same process; `sameStart` adds
+    // the proc-start-skew tolerance (whole-second truncation / suspend drift of 1-3 s) that desk and
+    // handoff already use, so a live worker is not declared dead by `board sweep`.
+    if (!cur || !w.started || sameStart(cur, w.started)) return true;
   }
   if (w && isStr(w.out_path)) {
     if (mtimeNewer(w.out_path, cutoff) || mtimeNewer(`${w.out_path}.events.jsonl`, cutoff)) return true;
