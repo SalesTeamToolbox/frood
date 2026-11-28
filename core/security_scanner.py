@@ -322,37 +322,39 @@ class ScheduledSecurityScanner:
             self._scan_private = None
             return
 
-        if report["total"] == 0:
-            # Clean scan — close any existing open issue
+        try:
+            if report["total"] == 0:
+                # Clean scan — close any existing open issue
+                existing = await self._get_existing_issue()
+                if existing:
+                    ok = await self._close_issue(
+                        existing, f"Security scan passed with no findings at {report['timestamp']}."
+                    )
+                    if ok:
+                        logger.info(f"Closed security scan issue #{existing} (clean scan)")
+                return
+
+            body = self._format_report_body(report)
+            title = (
+                f"[Security Scan] {report['overall_severity'].upper()} — "
+                f"{report['total']} findings ({report['timestamp'][:10]})"
+            )
+
             existing = await self._get_existing_issue()
             if existing:
-                ok = await self._close_issue(
-                    existing, f"Security scan passed with no findings at {report['timestamp']}."
-                )
+                # Update existing issue with a comment
+                ok = await self._comment_on_issue(existing, body)
                 if ok:
-                    logger.info(f"Closed security scan issue #{existing} (clean scan)")
+                    logger.info(f"Updated security scan issue #{existing} with new findings")
+            else:
+                # Create new issue
+                ok = await self._create_issue(title, body, ["security-scan"])
+                if ok:
+                    logger.info("Created new security scan GitHub issue")
+        finally:
+            # Reset so direct write-method calls after this scan check for
+            # themselves, even if the body above raises or is cancelled.
             self._scan_private = None
-            return
-
-        body = self._format_report_body(report)
-        title = (
-            f"[Security Scan] {report['overall_severity'].upper()} — "
-            f"{report['total']} findings ({report['timestamp'][:10]})"
-        )
-
-        existing = await self._get_existing_issue()
-        if existing:
-            # Update existing issue with a comment
-            ok = await self._comment_on_issue(existing, body)
-            if ok:
-                logger.info(f"Updated security scan issue #{existing} with new findings")
-        else:
-            # Create new issue
-            ok = await self._create_issue(title, body, ["security-scan"])
-            if ok:
-                logger.info("Created new security scan GitHub issue")
-        # Reset so direct write-method calls after this scan check for themselves.
-        self._scan_private = None
 
     def _format_report_body(self, report: dict) -> str:
         """Format scan report as GitHub-flavored markdown."""

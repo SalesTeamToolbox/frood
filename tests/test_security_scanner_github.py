@@ -169,31 +169,44 @@ class TestPublicGuard:
         assert not any("skipped" in w for w in warns)
 
     @pytest.mark.asyncio
-    async def test_repo_view_fail_closed(self, monkeypatch, caplog):
-        """gh repo view exit 1 / timeout / missing -> nothing written."""
-        for exc in (None, TimeoutError()):
-            mocker = SubprocessMocker()
-            if exc is None:
-                # exit 1
-                mocker.responses["repo_view"] = (1, b"", b"not a repo")
-            else:
-                mocker._repo_view_exc = exc
-            _patch_subprocess(monkeypatch, mocker)
-            caplog.set_level(logging.DEBUG, logger="frood.security_scanner")
+    @pytest.mark.parametrize(
+        "setup,expected_label",
+        [
+            # gh repo view exits non-zero -> visibility None -> UNKNOWN (exit 1)
+            (
+                lambda m: m.responses.__setitem__("repo_view", (1, b"", b"not a repo")),
+                "UNKNOWN (exit 1)",
+            ),
+            # gh repo view times out -> visibility None -> UNKNOWN (timed out)
+            (lambda m: setattr(m, "_repo_view_exc", TimeoutError()), "UNKNOWN (timed out)"),
+        ],
+    )
+    async def test_repo_view_fail_closed(self, monkeypatch, caplog, setup, expected_label):
+        """gh repo view exit 1 / timeout -> nothing written, UNKNOWN (<reason>) warning."""
+        mocker = SubprocessMocker()
+        setup(mocker)
+        _patch_subprocess(monkeypatch, mocker)
+        caplog.set_level(logging.DEBUG, logger="frood.security_scanner")
 
-            scanner = ScheduledSecurityScanner(workspace_path="/tmp/wt")
-            scanner._github_issues = True
-            await scanner._report_to_github(_make_report())
+        scanner = ScheduledSecurityScanner(workspace_path="/tmp/wt")
+        scanner._github_issues = True
+        await scanner._report_to_github(_make_report())
 
-            assert mocker.issue_calls() == [], f"writes on fail-closed case {exc!r}"
-            warns = _warning_messages(caplog)
-            assert any("skipped" in w for w in warns)
+        # No gh issue subcommand at all (fail closed).
+        assert mocker.issue_calls() == [], f"writes on fail-closed case {expected_label!r}"
+        # gh repo view ran once.
+        assert len(mocker.repo_view_calls()) == 1
+        warns = _warning_messages(caplog)
+        assert any(expected_label in w and "skipped" in w for w in warns), warns
 
     @pytest.mark.asyncio
     async def test_gh_missing_fail_closed(self, monkeypatch, caplog):
+        """gh missing (FileNotFoundError) -> nothing written, UNKNOWN (gh not found)."""
         mocker = SubprocessMocker()
+        recorded = []
 
         async def boom(*args, **kwargs):
+            recorded.append(args)
             raise FileNotFoundError("gh: not found")
 
         _patch_subprocess(monkeypatch, boom)
@@ -202,9 +215,12 @@ class TestPublicGuard:
         scanner = ScheduledSecurityScanner(workspace_path="/tmp/wt")
         scanner._github_issues = True
         await scanner._report_to_github(_make_report())
+
+        # The first (and only) spawn attempt was gh repo view; no issue subcommand.
+        assert recorded == [("gh", "repo", "view", "--json", "visibility,nameWithOwner")]
         assert mocker.issue_calls() == []
         warns = _warning_messages(caplog)
-        assert any("skipped" in w for w in warns)
+        assert any("UNKNOWN (gh not found)" in w and "skipped" in w for w in warns), warns
 
 
 class TestTruthfulLogs:
@@ -360,6 +376,60 @@ class TestConstructorAndSettings:
         # Clean scan on a PRIVATE repo — closes nothing; _scan_private is reset
         # after the scan so direct calls check for themselves.
         await scanner._report_to_github(_make_report(total=0))
+
+        # Repo flips to PUBLIC; direct _create_issue must fail closed.
+        mocker.responses["repo_view"] = (
+            0,
+            b'{"visibility": "PUBLIC", "nameWithOwner": "owner/repo"}',
+            b"",
+        )
+        mocker.calls.clear()
+        ok = await scanner._create_issue("t", "b", ["security-scan"])
+        assert ok is False
+        assert mocker.issue_calls() == []
+
+    @pytest.mark.asyncio
+    async def test_report_exception_resets_scan_private(self, monkeypatch, caplog):
+        """Finding #1: a non-local exit mid-scan must still reset _scan_private.
+
+        If _format_report_body raises (or the report shape drifts), the finally
+        block resets _scan_private so a later direct _create_issue re-checks
+        visibility instead of short-circuiting True.
+        """
+        mocker = SubprocessMocker()
+        mocker.responses["repo_view"] = (
+            0,
+            b'{"visibility": "PRIVATE", "nameWithOwner": "owner/repo"}',
+            b"",
+        )
+        mocker.responses["issue_list"] = (0, b"[]", b"")
+        _patch_subprocess(monkeypatch, mocker)
+        caplog.set_level(logging.DEBUG, logger="frood.security_scanner")
+
+        scanner = ScheduledSecurityScanner(workspace_path="/tmp/wt")
+        scanner._github_issues = True
+        # A findings report whose body formatter raises mid-scan.
+        bad_report = {
+            "timestamp": "2026-11-28T01:06:00+00:00",
+            "findings": [{"severity": "high", "category": "x", "description": "f", "detail": ""}],
+            "counts": {"critical": 0, "high": 1, "medium": 0, "low": 0},
+            "overall_severity": "high",
+            "total": 1,
+        }
+        original = scanner._format_report_body
+
+        def boom(_report):
+            raise KeyError("counts")
+
+        scanner._format_report_body = boom
+        try:
+            with pytest.raises(KeyError):
+                await scanner._report_to_github(bad_report)
+        finally:
+            scanner._format_report_body = original
+
+        # The guard flag must be reset even though the scan raised.
+        assert scanner._scan_private is None
 
         # Repo flips to PUBLIC; direct _create_issue must fail closed.
         mocker.responses["repo_view"] = (

@@ -1,4 +1,4 @@
-# Common Pitfalls Archive (1-124)
+# Common Pitfalls Archive (1-125)
 
 Resolved pitfalls from earlier development. Loaded on-demand when debugging or
 working on areas covered by these entries.
