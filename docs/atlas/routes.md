@@ -13,7 +13,7 @@ STT/Volnova code.
 | Memory | `/api/memory/search`, `/api/memory/stats`, `/api/knowledge/learn`, `/api/learnings/retrieve`, `/api/consolidate/trigger` | Recall, learnings, and memory-pipeline outcome |
 | Effectiveness & recommendations | `/api/effectiveness/*`, `/api/recommendations/retrieve` | Tool success-rate tracking and next-tool recommendation |
 | LLM proxy | `/llm/*`, `/v1/messages`, `/api/models/*` | Model routing tier and chat/completions outcome |
-| Gateway | `/gw/v1/messages`, `/gw/v1/models` | Terminal-Claude-Code passthrough to OpenCode Go (route table + token/loopback gates) |
+| Gateway | `/gw/v1/messages`, `/gw/v1/models`, `/gw/v1/routes`, `/gw/v1/messages/count_tokens` | Terminal Claude Code tier routing over OpenCode Go and Nvidia (plan_route candidate order, pace-gated Go, Nvidia fallback + 429 retry, route table, token/loopback gates) |
 | Providers | `/api/providers`, `/api/settings/provider-status`, `/api/cc/pace`, `/api/models/health*` | Provider connectivity and paid/free classification |
 | Tools | `/api/tools`, `/api/tools/{name}`, `/api/skills`, `/api/skills/{name}` | Tool/skill enabled/disabled state |
 | CLI setup | `/api/cli-setup/detect`, `/api/cli-setup/wire` | Cross-CLI wiring state |

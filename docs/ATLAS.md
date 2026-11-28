@@ -180,18 +180,30 @@ decides: LLM proxy configuration (endpoint, default model, available models)
 sibling traps: /llm/models, /llm/chat/completions
 topic: docs/atlas/routes.md
 
-## Claude Code gateway (/gw passthrough to OpenCode Go)
+## Claude Code gateway (/gw routes to OpenCode Go and Nvidia)
 
 ### /gw/v1/messages
 handler: dashboard.gateway.build_gateway_router
-decides: routed to Go upstream (route table dashboard.gateway.build_route_table) or refused (auth dashboard.gateway.check_gateway_auth, claude-id block, loopback gates)
-sibling traps: /gw/v1/models, /llm/v1/messages, /v1/messages, /llm/v1/models
+decides: requested id -> ordered candidates via dashboard.gateway.plan_route (Go skipped when the pace state is over via dashboard.gateway.read_go_state; Nvidia fallback per tier) or refused (auth dashboard.gateway.check_gateway_auth, claude-id block, loopback gates); Nvidia leg _attempt_nvidia translates Anthropic -> OpenAI through dashboard/gateway_translate.py, waiting-and-retrying on Nvidia 429 (<=3 retries, <=30 s)
+sibling traps: /gw/v1/routes, /gw/v1/models, /gw/v1/messages/count_tokens, /llm/v1/messages, /v1/messages
 topic: docs/atlas/routes.md
 
 ### /gw/v1/models
 handler: dashboard.gateway.build_gateway_router
-decides: routed Go model list (same route table and auth as /gw/v1/messages)
-sibling traps: /gw/v1/messages, /llm/v1/models, /llm/models
+decides: routed Go model ids, plus Nvidia-routed ids when an Nvidia key resolves (same route table and auth as /gw/v1/messages)
+sibling traps: /gw/v1/messages, /gw/v1/routes, /gw/v1/messages/count_tokens, /llm/v1/messages, /v1/messages
+topic: docs/atlas/routes.md
+
+### /gw/v1/routes
+handler: dashboard.gateway.build_gateway_router
+decides: static route table for GET /gw/v1/routes built by dashboard.gateway.build_route_view: model_id -> [go:upstream, nvidia:fallback] or [nvidia:upstream] (Go wins when an id is in both tables); the table itself carries no secrets and no go_state — the response envelope returns `go_state` alongside `routes`
+sibling traps: /gw/v1/messages, /gw/v1/models, /gw/v1/messages/count_tokens, /llm/v1/messages, /v1/messages
+topic: docs/atlas/routes.md
+
+### /gw/v1/messages/count_tokens
+handler: dashboard.gateway.build_gateway_router
+decides: POST /gw/v1/messages/count_tokens — gateway_count_tokens; refused with 404 "count_tokens is not supported" (not implemented)
+sibling traps: /gw/v1/messages, /gw/v1/models, /gw/v1/routes, /llm/v1/messages, /v1/messages
 topic: docs/atlas/routes.md
 
 ## Providers
@@ -570,11 +582,18 @@ sibling traps: the pane loads only when `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/
 handler: orchestrator/ops/systemd/orchestrator-desk-daemon.service; orchestrator/ops/systemd/orchestrator-desk-check.service; orchestrator/ops/systemd/install.mjs
 decides: install.mjs fills @PATH@ at install time (node's directory first, then opencode and claude directories when found, mise shims, then system dirs, de-duplicated and existing-only) and both service templates carry `Environment=PATH=@PATH@`, so the desk daemon and check launched by systemd --user can spawn opencode and claude despite systemd's default user PATH
 
+## Claude Code launcher
+
+### /frood-cc launcher (frood-cc-launcher.py)
+handler: frood-cc-launcher.py main / build_env / preflight / ensure_token
+decides: which mode (go | nvidia | cc | status); go/nvidia set ANTHROPIC_BASE_URL=http://127.0.0.1:8000/gw, pass the gateway token as ANTHROPIC_AUTH_TOKEN, set the per-tier ANTHROPIC_DEFAULT_OPUS_MODEL / ANTHROPIC_DEFAULT_SONNET_MODEL / ANTHROPIC_DEFAULT_HAIKU_MODEL ids, and strip the desktop CLAUDE_CODE_* host-auth and ANTHROPIC_* variables for a clean environment; cc runs the normal subscription; status prints health, gateway reachability/auth and tier ids
+trap: the command doc is .claude/commands/frood-cc.md, installed by ops/install.mjs --global
+
 ## Release train
 
 ### ops/train.sh step 2 (pinned tests)
 handler: ops/train.sh
-decides: which tests the train runs for a ticket (python convention → board ticket blast_radius test → Mandate tests: line) or refuses it with exit 1
+decides: which tests the train runs for a ticket (python convention → board ticket blast_radius test → Mandate tests: line) or refuses it with exit 1; venv-first rule — pytest and ruff run from the checkout's .venv/bin/ when executable, else python3 / ruff on PATH; PATH is never changed
 
 ## Workstation (Linux)
 

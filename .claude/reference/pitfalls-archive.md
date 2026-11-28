@@ -1,4 +1,4 @@
-# Common Pitfalls Archive (1-125)
+# Common Pitfalls Archive (1-129)
 
 Resolved pitfalls from earlier development. Loaded on-demand when debugging or
 working on areas covered by these entries.
@@ -130,3 +130,7 @@ working on areas covered by these entries.
 | 123 | Status | System RAM showed `0 / 0 MB` on Windows — `memory_total_mb` and `memory_available_mb` were hardcoded to 0 in heartbeat | Use `GlobalMemoryStatusEx` on Windows, `/proc/meminfo` on Linux to populate system memory fields |
 | 124 | Frontend | `/api/tasks` endpoint removed in v2.0 but frontend `loadTasks()` still called it — caused 404 on every page load | Replace `await api("/tasks")` with `state.tasks = []` (tasks are project-scoped now) |
 | 125 | Security | `ScheduledSecurityScanner._report_to_github` ran `gh issue create/comment/close` from `self._workspace` on every scan with full findings, and `frood.py` built the scanner without wiring `SECURITY_SCAN_GITHUB_ISSUES` (constructor defaulted to `True`), so findings were posted to the public repo by default and success was logged even when `gh` failed | Wire `github_issues_enabled`, `interval_seconds` and `min_severity` from settings in `frood.py`; default `github_issues_enabled` to `False`; add `_repo_is_private()` fail-closed guard (PRIVATE/INTERNAL only, once per scan, cached WARNING per (repo, visibility)) inside `_report_to_github` and all three write methods; return booleans from writes and log Created/Updated/Closed only on exit 0, with stderr cut to 300 chars on failure |
+| 126 | Desktop | Claude Desktop sets `ANTHROPIC_BASE_URL` for every Code-tab session and refuses an override ("managed by Claude Desktop"); folder `settings.local.json` env is ignored | Use terminal Claude Code via `/frood-cc go\|nvidia`, which points `ANTHROPIC_BASE_URL` at the `/gw` gateway from a clean environment |
+| 127 | Desktop 3P | Claude Desktop's third-party inference mode keeps only Anthropic models; non-Claude ids in `inferenceModels` are removed ("is not an Anthropic model") and the picker is empty. Do not rename other models as `claude-*` routes | Fix: terminal Claude Code through `/gw` |
+| 128 | Ops | Never select processes by a name pattern to stop them (`pkill -f`, `kill $(pgrep -f …)`) — the pattern also matched agent shells and oc-worker (incident 2026-11-28 04:33) | Record the pid at start; stop only that pid |
+| 129 | Tests/CLI | Inside a desktop session, a child `claude` sends the subscription OAuth bearer even with `ANTHROPIC_API_KEY` set | Launch it from a clean env (the launcher does) |
