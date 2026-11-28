@@ -359,12 +359,13 @@ class Settings:
     gateway_upstream_timeout_s: float = 600
     gateway_nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
     gateway_nvidia_models: str = (
-        "nvidia/nemotron-3.5-super-vl-120b-a12b,qwen/qwen3-coder-480b-a35b-instruct"
+        "minimaxai/minimax-m3.1-flash,nvidia/nemotron-3.5-lightning-30b-a3b,"
+        "nvidia/nemotron-3.5-super-vl-120b-a12b"
     )
     gateway_go_fallback: str = (
-        "kimi-k3=nvidia/nemotron-3.5-super-vl-120b-a12b,"
-        "glm-5.3-flash=nvidia/nemotron-3.5-super-vl-120b-a12b,"
-        "deepseek-v4.1-flash=qwen/qwen3-coder-480b-a35b-instruct"
+        "kimi-k3=minimaxai/minimax-m3.1-flash,"
+        "glm-5.3-flash=minimaxai/minimax-m3.1-flash,"
+        "deepseek-v4.1-flash=nvidia/nemotron-3.5-lightning-30b-a3b"
     )
     gateway_go_pace_max_pct: float = 90
     gateway_go_usage_path: str = "~/.config/orchestrator/go-usage.jsonl"
@@ -714,13 +715,14 @@ class Settings:
             ),
             gateway_nvidia_models=os.getenv(
                 "GATEWAY_NVIDIA_MODELS",
-                "nvidia/nemotron-3.5-super-vl-120b-a12b,qwen/qwen3-coder-480b-a35b-instruct",
+                "minimaxai/minimax-m3.1-flash,nvidia/nemotron-3.5-lightning-30b-a3b,"
+                "nvidia/nemotron-3.5-super-vl-120b-a12b",
             ),
             gateway_go_fallback=os.getenv(
                 "GATEWAY_GO_FALLBACK",
-                "kimi-k3=nvidia/nemotron-3.5-super-vl-120b-a12b,"
-                "glm-5.3-flash=nvidia/nemotron-3.5-super-vl-120b-a12b,"
-                "deepseek-v4.1-flash=qwen/qwen3-coder-480b-a35b-instruct",
+                "kimi-k3=minimaxai/minimax-m3.1-flash,"
+                "glm-5.3-flash=minimaxai/minimax-m3.1-flash,"
+                "deepseek-v4.1-flash=nvidia/nemotron-3.5-lightning-30b-a3b",
             ),
             gateway_go_pace_max_pct=float(os.getenv("GATEWAY_GO_PACE_MAX_PCT", "90")),
             gateway_go_usage_path=os.getenv(

@@ -29,6 +29,7 @@ import os
 import re
 import sqlite3
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -54,11 +55,14 @@ DEFAULT_GO_MODELS = (
     "deepseek-v4.1-flash,glm-5.3-flash,kimi-k3,minimax-m3,qwen3.8-flash,kimi-k2.7-code,glm-5.3"
 )
 DEFAULT_NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
-DEFAULT_NVIDIA_MODELS = "nvidia/nemotron-3.5-super-vl-120b-a12b,qwen/qwen3-coder-480b-a35b-instruct"
+DEFAULT_NVIDIA_MODELS = (
+    "minimaxai/minimax-m3.1-flash,nvidia/nemotron-3.5-lightning-30b-a3b,"
+    "nvidia/nemotron-3.5-super-vl-120b-a12b"
+)
 DEFAULT_GO_FALLBACK = (
-    "kimi-k3=nvidia/nemotron-3.5-super-vl-120b-a12b,"
-    "glm-5.3-flash=nvidia/nemotron-3.5-super-vl-120b-a12b,"
-    "deepseek-v4.1-flash=qwen/qwen3-coder-480b-a35b-instruct"
+    "kimi-k3=minimaxai/minimax-m3.1-flash,"
+    "glm-5.3-flash=minimaxai/minimax-m3.1-flash,"
+    "deepseek-v4.1-flash=nvidia/nemotron-3.5-lightning-30b-a3b"
 )
 DEFAULT_GO_PACE_MAX_PCT = 90.0
 DEFAULT_GO_USAGE_PATH = "~/.config/orchestrator/go-usage.jsonl"
@@ -573,6 +577,7 @@ def build_gateway_router(
     go_pace_max_pct: object = DEFAULT_GO_PACE_MAX_PCT,
     go_usage_path: object = DEFAULT_GO_USAGE_PATH,
     nvidia_key: object = "",
+    sleeper: Callable[[float], Awaitable[None]] | None = None,
 ) -> APIRouter:
     """Build the /gw router. All config is passed explicitly (never read from
     a possibly-mocked settings object at request time); non-str values fail
@@ -605,6 +610,8 @@ def build_gateway_router(
     usage_path = _as_str(go_usage_path, DEFAULT_GO_USAGE_PATH) or DEFAULT_GO_USAGE_PATH
     # A non-str key counts as empty: no Nvidia routes, never a 500.
     nvidia_key_str = nvidia_key if isinstance(nvidia_key, str) else ""
+    # Nvidia 429 waits use asyncio.sleep unless a test injects a sleeper.
+    sleep = sleeper if sleeper is not None else asyncio.sleep
     tables = RouteTables(
         go=route_table,
         nvidia=nvidia_table,
@@ -727,15 +734,42 @@ def build_gateway_router(
         return error_response(504, "api_error", f"gateway: upstream timed out ({host})")
 
     def _nvidia_error(status: int, raw: bytes, upstream_headers: httpx.Headers) -> JSONResponse:
-        """Map an Nvidia OpenAI-style error body with its status code."""
+        """Map an Nvidia OpenAI-style error body with its status code.
+
+        A 429 keeps ``retry-after`` when present but never carries
+        ``x-should-retry``: Nvidia 429s are retried inside the gateway first,
+        and the survivor is left for Claude Code's own backoff.
+        """
         content = openai_error_to_anthropic(status, raw)
         headers: dict[str, str] = {}
         if status == 429:
-            headers["x-should-retry"] = "false"
             retry_after = upstream_headers.get("retry-after")
             if retry_after is not None:
                 headers["retry-after"] = retry_after
         return JSONResponse(status_code=status, content=content, headers=headers)
+
+    # Nvidia 429 handling: wait and retry the same model (at most 3 retries,
+    # at most 30 s of waiting in total) before any response byte reaches the
+    # client. ``retry-after`` wins when present (capped at 20 s), else the
+    # 2/4/8 s backoff.
+    NVIDIA_429_MAX_RETRIES = 3
+    NVIDIA_429_MAX_WAIT_S = 30.0
+    NVIDIA_429_RETRY_AFTER_CAP_S = 20.0
+    NVIDIA_429_BACKOFF_S = (2.0, 4.0, 8.0)
+
+    def _nvidia_429_wait_s(upstream_headers: httpx.Headers, retry_index: int) -> float:
+        """Wait before Nvidia 429 retry ``retry_index`` (1-based)."""
+        raw = upstream_headers.get("retry-after") if upstream_headers is not None else None
+        if raw is not None:
+            try:
+                parsed = float(str(raw).strip())
+            except (TypeError, ValueError):
+                parsed = None
+            if parsed is not None and parsed >= 0:
+                return min(parsed, NVIDIA_429_RETRY_AFTER_CAP_S)
+        if 1 <= retry_index <= len(NVIDIA_429_BACKOFF_S):
+            return NVIDIA_429_BACKOFF_S[retry_index - 1]
+        return NVIDIA_429_BACKOFF_S[-1]
 
     def _go_retry_status(status: int) -> bool:
         """Pre-stream Go statuses worth falling back on: 429, 402 or 5xx."""
@@ -879,26 +913,70 @@ def build_gateway_router(
         client: httpx.AsyncClient,
         nvidia_key: str,
     ) -> tuple[str, object, object]:
-        """Try the Nvidia candidate once (same contract as _attempt_go)."""
+        """Try the Nvidia candidate (same contract as _attempt_go).
+
+        A 429 waits and retries the same model (at most 3 retries, at most
+        30 s of waiting) before any response byte reaches the client; the
+        survivor keeps ``retry-after`` but never ``x-should-retry``.
+        """
         openai_body, warnings = anthropic_to_openai(body, candidate_upstream)
         logger.debug("gateway nvidia translation warnings=%d", len(warnings))
         headers = _nvidia_headers(nvidia_key)
         url = nvidia_base + "/chat/completions"
         host = _upstream_host(nvidia_base)
         if stream:
-            try:
-                upstream = await client.send(
-                    client.build_request("POST", url, headers=headers, json=openai_body),
-                    stream=True,
+            waited = 0.0
+            attempt = 0
+            while True:
+                attempt += 1
+                try:
+                    upstream = await client.send(
+                        client.build_request("POST", url, headers=headers, json=openai_body),
+                        stream=True,
+                    )
+                except httpx.TransportError as exc:
+                    return ("fallback", type(exc).__name__, _upstream_failure(exc, host))
+                except Exception as exc:
+                    return (
+                        "fallback",
+                        type(exc).__name__,
+                        error_response(502, "api_error", f"gateway: upstream unreachable ({host})"),
+                    )
+                if upstream.status_code != 429:
+                    break
+                upstream_headers = upstream.headers
+                try:
+                    raw = await upstream.aread()
+                except Exception:
+                    try:
+                        await upstream.aclose()
+                    except Exception:
+                        pass
+                    return (
+                        "fallback",
+                        "read-error",
+                        error_response(
+                            502,
+                            "api_error",
+                            f"gateway: upstream error body unreadable ({host})",
+                        ),
+                    )
+                try:
+                    await upstream.aclose()
+                except Exception:
+                    pass
+                if attempt > NVIDIA_429_MAX_RETRIES:
+                    return ("fallback", "429", _nvidia_error(429, raw, upstream_headers))
+                wait = _nvidia_429_wait_s(upstream_headers, attempt)
+                if waited + wait > NVIDIA_429_MAX_WAIT_S:
+                    return ("fallback", "429", _nvidia_error(429, raw, upstream_headers))
+                logger.info(
+                    "gateway nvidia retry status=%s provider=nvidia attempt=%s",
+                    upstream.status_code,
+                    attempt,
                 )
-            except httpx.TransportError as exc:
-                return ("fallback", type(exc).__name__, _upstream_failure(exc, host))
-            except Exception as exc:
-                return (
-                    "fallback",
-                    type(exc).__name__,
-                    error_response(502, "api_error", f"gateway: upstream unreachable ({host})"),
-                )
+                await sleep(wait)
+                waited += wait
             if upstream.status_code >= 400:
                 status = upstream.status_code
                 upstream_headers = upstream.headers
@@ -961,16 +1039,42 @@ def build_gateway_router(
                 ),
                 None,
             )
-        try:
-            upstream = await client.post(url, headers=headers, json=openai_body)
-        except httpx.TransportError as exc:
-            return ("fallback", type(exc).__name__, _upstream_failure(exc, host))
-        except Exception as exc:
-            return (
-                "fallback",
-                type(exc).__name__,
-                error_response(502, "api_error", f"gateway: upstream unreachable ({host})"),
+        waited = 0.0
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                upstream = await client.post(url, headers=headers, json=openai_body)
+            except httpx.TransportError as exc:
+                return ("fallback", type(exc).__name__, _upstream_failure(exc, host))
+            except Exception as exc:
+                return (
+                    "fallback",
+                    type(exc).__name__,
+                    error_response(502, "api_error", f"gateway: upstream unreachable ({host})"),
+                )
+            if upstream.status_code != 429:
+                break
+            if attempt > NVIDIA_429_MAX_RETRIES:
+                return (
+                    "fallback",
+                    "429",
+                    _nvidia_error(upstream.status_code, upstream.content, upstream.headers),
+                )
+            wait = _nvidia_429_wait_s(upstream.headers, attempt)
+            if waited + wait > NVIDIA_429_MAX_WAIT_S:
+                return (
+                    "fallback",
+                    "429",
+                    _nvidia_error(upstream.status_code, upstream.content, upstream.headers),
+                )
+            logger.info(
+                "gateway nvidia retry status=%s provider=nvidia attempt=%s",
+                upstream.status_code,
+                attempt,
             )
+            await sleep(wait)
+            waited += wait
         if upstream.status_code >= 400:
             terminal = _nvidia_error(upstream.status_code, upstream.content, upstream.headers)
             if _go_retry_status(upstream.status_code):
