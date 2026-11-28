@@ -357,6 +357,17 @@ class Settings:
         "deepseek-v4.1-flash,glm-5.3-flash,kimi-k3,minimax-m3,qwen3.8-flash,kimi-k2.7-code,glm-5.3"
     )
     gateway_upstream_timeout_s: float = 600
+    gateway_nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
+    gateway_nvidia_models: str = (
+        "nvidia/nemotron-3.5-super-vl-120b-a12b,qwen/qwen3-coder-480b-a35b-instruct"
+    )
+    gateway_go_fallback: str = (
+        "kimi-k3=nvidia/nemotron-3.5-super-vl-120b-a12b,"
+        "glm-5.3-flash=nvidia/nemotron-3.5-super-vl-120b-a12b,"
+        "deepseek-v4.1-flash=qwen/qwen3-coder-480b-a35b-instruct"
+    )
+    gateway_go_pace_max_pct: float = 90
+    gateway_go_usage_path: str = "~/.config/orchestrator/go-usage.jsonl"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -698,6 +709,23 @@ class Settings:
                 "qwen3.8-flash,kimi-k2.7-code,glm-5.3",
             ),
             gateway_upstream_timeout_s=float(os.getenv("GATEWAY_UPSTREAM_TIMEOUT_S", "600")),
+            gateway_nvidia_base_url=os.getenv(
+                "GATEWAY_NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1"
+            ),
+            gateway_nvidia_models=os.getenv(
+                "GATEWAY_NVIDIA_MODELS",
+                "nvidia/nemotron-3.5-super-vl-120b-a12b,qwen/qwen3-coder-480b-a35b-instruct",
+            ),
+            gateway_go_fallback=os.getenv(
+                "GATEWAY_GO_FALLBACK",
+                "kimi-k3=nvidia/nemotron-3.5-super-vl-120b-a12b,"
+                "glm-5.3-flash=nvidia/nemotron-3.5-super-vl-120b-a12b,"
+                "deepseek-v4.1-flash=qwen/qwen3-coder-480b-a35b-instruct",
+            ),
+            gateway_go_pace_max_pct=float(os.getenv("GATEWAY_GO_PACE_MAX_PCT", "90")),
+            gateway_go_usage_path=os.getenv(
+                "GATEWAY_GO_USAGE_PATH", "~/.config/orchestrator/go-usage.jsonl"
+            ),
         )
 
     def is_paid_allowed(self, provider: str) -> bool:

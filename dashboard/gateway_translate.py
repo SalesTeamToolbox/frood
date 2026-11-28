@@ -544,18 +544,30 @@ class StreamTranslator:
         return b"".join(self._out)
 
     def finish(self) -> bytes:
-        """Flush and emit closing events if upstream ended without [DONE]."""
+        """Flush and emit closing events if upstream ended without [DONE].
+
+        Emits ``message_start`` first when nothing was fed: an upstream that
+        closes at once must still give the client a well-formed stream.
+        """
         self._out = []
         if self._errored:
             return b""
+        if not self._started:
+            self._emit_message_start()
         self._finish_stream()
         return b"".join(self._out)
 
     def error(self, message: str) -> bytes:
-        """Close any open block and emit an error event; nothing after it."""
+        """Close any open block and emit an error event; nothing after it.
+
+        Emits ``message_start`` first when nothing was fed. After ``finish()``
+        this emits nothing: the stream already closed with ``message_stop``.
+        """
         self._out = []
-        if self._errored:
+        if self._errored or self._finished:
             return b"".join(self._out)
+        if not self._started:
+            self._emit_message_start()
         if self._text_open:
             self._emit_cb_stop(0)
             self._text_open = False

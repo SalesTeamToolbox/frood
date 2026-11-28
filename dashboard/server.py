@@ -3507,6 +3507,12 @@ Focus on learnings that would help in future similar sessions."""
             models=settings.gateway_go_models,
             timeout_s=settings.gateway_upstream_timeout_s,
             version=app.version,
+            nvidia_base_url=settings.gateway_nvidia_base_url,
+            nvidia_models=settings.gateway_nvidia_models,
+            go_fallback=settings.gateway_go_fallback,
+            go_pace_max_pct=settings.gateway_go_pace_max_pct,
+            go_usage_path=settings.gateway_go_usage_path,
+            nvidia_key=settings.nvidia_api_key,
         )
     )
 

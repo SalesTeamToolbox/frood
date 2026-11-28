@@ -634,7 +634,10 @@ def test_key_cached_after_first_db_success(monkeypatch, tmp_path):
 
 
 def test_no_secrets_in_logs(monkeypatch, caplog):
-    """GW-11: DEBUG logging of a streaming + 401-upstream run leaks nothing."""
+    """GW-11: DEBUG logging of a streaming + 401-upstream run leaks nothing.
+
+    GW-T3-b: the streaming leg carries real SSE chunks (not zero chunks).
+    """
 
     def handler_401(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -645,7 +648,7 @@ def test_no_secrets_in_logs(monkeypatch, caplog):
             ).encode(),
         )
 
-    client = _client_for(monkeypatch, _settings(), _streaming_handler([]))
+    client = _client_for(monkeypatch, _settings(), _streaming_handler([], SSE_CHUNKS))
     with caplog.at_level(logging.DEBUG):
         client.post("/gw/v1/messages", json=_msg_body(stream=True), headers=AUTH_BEARER)
         client2 = _client_for(monkeypatch, _settings(), handler_401)
@@ -658,6 +661,77 @@ def test_no_secrets_in_logs(monkeypatch, caplog):
             args_text = ""
         assert GO_KEY not in text and GO_KEY not in args_text
         assert TOKEN not in text and TOKEN not in args_text
+
+
+# -- gw-t3 carry-overs ---------------------------------------------------------
+
+
+def test_no_is_disconnected_in_relay():
+    """GW-T3-a: the manual receive()/is_disconnected check is gone.
+
+    A receive() failure must not end the stream as a silent success; the
+    relay now ends only on upstream end (GW-01 streams real chunks through
+    create_app and asserts identical bytes in order).
+    """
+    from pathlib import Path
+
+    src = Path(gw_module.__file__).read_text(encoding="utf-8")
+    assert "is_disconnected" not in src
+
+
+def test_shared_client_closed_on_app_exit(monkeypatch):
+    """GW-T3-b: exiting TestClient(app) closes the shared upstream client."""
+    closed: list[bool] = []
+    original_aclose = httpx.AsyncClient.aclose
+
+    async def spy_aclose(self):
+        closed.append(True)
+        await original_aclose(self)
+
+    monkeypatch.setattr(httpx.AsyncClient, "aclose", spy_aclose)
+    client = _client_for(monkeypatch, _settings(), _streaming_handler([]))
+    with client:
+        resp = client.post("/gw/v1/messages", json=_msg_body(stream=True), headers=AUTH_BEARER)
+        assert resp.status_code == 200
+    assert closed, "router on_shutdown must close the shared httpx client"
+
+
+def test_upstream_content_type_params_preserved(monkeypatch):
+    """GW-T3-c: the upstream content-type passes through unchanged (parameters kept)."""
+    payload = {"id": "msg_1", "type": "message"}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json; charset=utf-8"},
+            json=payload,
+        )
+
+    client = _client_for(monkeypatch, _settings(), handler)
+    resp = client.post("/gw/v1/messages", json=_msg_body(), headers=AUTH_BEARER)
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/json; charset=utf-8"
+
+
+def test_streaming_content_type_params_preserved(monkeypatch):
+    """GW-T3-c: streaming content-type parameters also pass through unchanged."""
+
+    async def _achunks():
+        for chunk in SSE_CHUNKS:
+            yield chunk
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream; charset=utf-8"},
+            content=_achunks(),
+        )
+
+    client = _client_for(monkeypatch, _settings(), handler)
+    resp = client.post("/gw/v1/messages", json=_msg_body(stream=True), headers=AUTH_BEARER)
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "text/event-stream; charset=utf-8"
+    assert resp.content == b"".join(SSE_CHUNKS)
 
 
 # -- bar 12: security headers ------------------------------------------------------
