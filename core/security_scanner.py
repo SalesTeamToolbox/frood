@@ -33,7 +33,7 @@ class ScheduledSecurityScanner:
         workspace_path: str,
         interval_seconds: float = 28800.0,
         min_severity: str = "medium",
-        github_issues_enabled: bool = True,
+        github_issues_enabled: bool = False,
         notification_service=None,
         memory_store=None,
     ):
@@ -44,6 +44,16 @@ class ScheduledSecurityScanner:
         self._notification_service = notification_service
         self._memory_store = memory_store
         self._running = False
+        # Repo privacy state for the public guard (fail closed).
+        # _repo_visibility / _repo_name hold the current scan's gh repo view result.
+        self._repo_visibility: str | None = None
+        self._repo_name: str = "unknown repo"
+        self._repo_unavailable_reason: str | None = None
+        # _scan_private is True only while _report_to_github is running on a
+        # PRIVATE/INTERNAL repo; write methods reuse it and reset it after.
+        self._scan_private: bool | None = None
+        # (repo, visibility) pairs already warned about, once per process.
+        self._warned_visibility: set[tuple[str, str]] = set()
 
     async def start(self):
         """Background loop: startup delay, then scan at interval."""
@@ -212,33 +222,139 @@ class ScheduledSecurityScanner:
 
         return findings
 
+    async def _repo_is_private(self) -> bool:
+        """Return True only when the workspace repo is PRIVATE or INTERNAL.
+
+        Runs ``gh repo view --json visibility,nameWithOwner`` in
+        ``self._workspace`` with a 30 s timeout. Any error, timeout, missing
+        ``gh``, non-zero exit or unparsable output counts as not private
+        (fail closed). The visibility, repo name and unavailability reason are
+        stored on the instance for reuse within the same scan.
+        """
+        self._repo_visibility = None
+        self._repo_name = "unknown repo"
+        self._repo_unavailable_reason = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "gh",
+                "repo",
+                "view",
+                "--json",
+                "visibility,nameWithOwner",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=self._workspace,
+            )
+            try:
+                stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+                self._repo_unavailable_reason = "timed out"
+                return False
+            if proc.returncode != 0:
+                self._repo_unavailable_reason = f"exit {proc.returncode}"
+                return False
+            try:
+                data = json.loads(stdout.decode())
+            except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+                self._repo_unavailable_reason = "unparsable output"
+                return False
+            vis = data.get("visibility")
+            name = data.get("nameWithOwner") or "unknown repo"
+            self._repo_name = str(name)
+            self._repo_visibility = str(vis) if vis is not None else None
+            return self._repo_visibility in ("PRIVATE", "INTERNAL")
+        except FileNotFoundError:
+            self._repo_unavailable_reason = "gh not found"
+            return False
+        except Exception as e:
+            self._repo_unavailable_reason = f"error: {e}"
+            return False
+
+    def _skip_due_to_visibility(self) -> bool:
+        """Log the skip warning once per (repo, visibility) and return True if skipped.
+
+        Called when the repo is not private (or visibility is unknown). The
+        warning names the repo and visibility and is logged once per process for
+        each distinct (repo, visibility) value.
+        """
+        vis = self._repo_visibility
+        name = self._repo_name
+        if vis in ("PRIVATE", "INTERNAL"):
+            return False
+        if vis is None:
+            vis_label = f"UNKNOWN ({self._repo_unavailable_reason or 'unknown'})"
+        else:
+            vis_label = vis
+        key = (name, vis_label)
+        if key not in self._warned_visibility:
+            self._warned_visibility.add(key)
+            logger.warning(
+                "security scanner: GitHub issue reporting skipped — %s is %s "
+                "(never posts findings to a non-private repo)",
+                name,
+                vis_label,
+            )
+        return True
+
+    async def _repo_write_permitted(self) -> bool:
+        """True if writing to GitHub is allowed for this call.
+
+        When called from ``_report_to_github`` on a private repo,
+        ``self._scan_private`` is True and the scan's ``gh repo view`` result is
+        reused. When called directly, the repo is checked for itself.
+        """
+        if self._scan_private is True:
+            return True
+        return await self._repo_is_private()
+
     async def _report_to_github(self, report: dict):
         """Create or update GitHub issues with scan findings."""
-        if report["total"] == 0:
-            # Clean scan — close any existing open issue
-            existing = await self._get_existing_issue()
-            if existing:
-                await self._close_issue(
-                    existing, f"Security scan passed with no findings at {report['timestamp']}."
-                )
-                logger.info(f"Closed security scan issue #{existing} (clean scan)")
+        if not self._github_issues:
+            return
+        # Fail closed: never post findings to a non-private repo.
+        self._scan_private = None
+        is_private = await self._repo_is_private()
+        self._scan_private = is_private
+        if not is_private:
+            self._skip_due_to_visibility()
+            self._scan_private = None
             return
 
-        body = self._format_report_body(report)
-        title = (
-            f"[Security Scan] {report['overall_severity'].upper()} — "
-            f"{report['total']} findings ({report['timestamp'][:10]})"
-        )
+        try:
+            if report["total"] == 0:
+                # Clean scan — close any existing open issue
+                existing = await self._get_existing_issue()
+                if existing:
+                    ok = await self._close_issue(
+                        existing, f"Security scan passed with no findings at {report['timestamp']}."
+                    )
+                    if ok:
+                        logger.info(f"Closed security scan issue #{existing} (clean scan)")
+                return
 
-        existing = await self._get_existing_issue()
-        if existing:
-            # Update existing issue with a comment
-            await self._comment_on_issue(existing, body)
-            logger.info(f"Updated security scan issue #{existing} with new findings")
-        else:
-            # Create new issue
-            await self._create_issue(title, body, ["security-scan"])
-            logger.info("Created new security scan GitHub issue")
+            body = self._format_report_body(report)
+            title = (
+                f"[Security Scan] {report['overall_severity'].upper()} — "
+                f"{report['total']} findings ({report['timestamp'][:10]})"
+            )
+
+            existing = await self._get_existing_issue()
+            if existing:
+                # Update existing issue with a comment
+                ok = await self._comment_on_issue(existing, body)
+                if ok:
+                    logger.info(f"Updated security scan issue #{existing} with new findings")
+            else:
+                # Create new issue
+                ok = await self._create_issue(title, body, ["security-scan"])
+                if ok:
+                    logger.info("Created new security scan GitHub issue")
+        finally:
+            # Reset so direct write-method calls after this scan check for
+            # themselves, even if the body above raises or is cancelled.
+            self._scan_private = None
 
     def _format_report_body(self, report: dict) -> str:
         """Format scan report as GitHub-flavored markdown."""
@@ -313,8 +429,10 @@ class ScheduledSecurityScanner:
             logger.warning(f"Failed to check existing issues: {e}")
         return None
 
-    async def _create_issue(self, title: str, body: str, labels: list[str]):
-        """Create a GitHub issue via gh CLI."""
+    async def _create_issue(self, title: str, body: str, labels: list[str]) -> bool:
+        """Create a GitHub issue via gh CLI. Returns True only on gh exit 0."""
+        if not await self._repo_write_permitted():
+            return False
         cmd = ["gh", "issue", "create", "--title", title, "--body", body]
         for label in labels:
             cmd.extend(["--label", label])
@@ -331,18 +449,24 @@ class ScheduledSecurityScanner:
                 proc.kill()
                 await proc.wait()
                 logger.warning("gh issue create timed out after 30s")
-                return
+                return False
             if proc.returncode != 0:
-                logger.error(f"gh issue create failed: {stderr.decode().strip()}")
-            else:
-                logger.info(f"GitHub issue created: {stdout.decode().strip()}")
+                err = stderr.decode(errors="replace").strip()[:300]
+                logger.warning("gh issue create failed: %s", err)
+                return False
+            logger.info(f"GitHub issue created: {stdout.decode().strip()}")
+            return True
         except FileNotFoundError:
             logger.warning("gh CLI not found — cannot create issues")
+            return False
         except Exception as e:
-            logger.error(f"Failed to create GitHub issue: {e}")
+            logger.warning(f"Failed to create GitHub issue: {e}")
+            return False
 
-    async def _comment_on_issue(self, issue_number: int, body: str):
-        """Add a comment to an existing GitHub issue."""
+    async def _comment_on_issue(self, issue_number: int, body: str) -> bool:
+        """Add a comment to an existing GitHub issue. Returns True only on gh exit 0."""
+        if not await self._repo_write_permitted():
+            return False
         try:
             proc = await asyncio.create_subprocess_exec(
                 "gh",
@@ -361,16 +485,24 @@ class ScheduledSecurityScanner:
                 proc.kill()
                 await proc.wait()
                 logger.warning("gh issue comment timed out after 30s")
-                return
+                return False
             if proc.returncode != 0:
-                logger.error(f"gh issue comment failed: {stderr.decode().strip()}")
+                err = stderr.decode(errors="replace").strip()[:300]
+                logger.warning("gh issue comment failed: %s", err)
+                return False
+            logger.info(f"Comment added to security scan issue #{issue_number}")
+            return True
         except FileNotFoundError:
             logger.warning("gh CLI not found — cannot comment on issues")
+            return False
         except Exception as e:
-            logger.error(f"Failed to comment on GitHub issue: {e}")
+            logger.warning(f"Failed to comment on GitHub issue: {e}")
+            return False
 
-    async def _close_issue(self, issue_number: int, comment: str):
-        """Close a GitHub issue with a comment."""
+    async def _close_issue(self, issue_number: int, comment: str) -> bool:
+        """Close a GitHub issue with a comment. Returns True only on gh exit 0."""
+        if not await self._repo_write_permitted():
+            return False
         try:
             proc = await asyncio.create_subprocess_exec(
                 "gh",
@@ -389,13 +521,19 @@ class ScheduledSecurityScanner:
                 proc.kill()
                 await proc.wait()
                 logger.warning("gh issue close timed out after 30s")
-                return
+                return False
             if proc.returncode != 0:
-                logger.error(f"gh issue close failed: {stderr.decode().strip()}")
+                err = stderr.decode(errors="replace").strip()[:300]
+                logger.warning("gh issue close failed: %s", err)
+                return False
+            logger.info(f"Closed security scan issue #{issue_number}")
+            return True
         except FileNotFoundError:
             logger.warning("gh CLI not found — cannot close issues")
+            return False
         except Exception as e:
-            logger.error(f"Failed to close GitHub issue: {e}")
+            logger.warning(f"Failed to close GitHub issue: {e}")
+            return False
 
     async def _notify(self, report: dict):
         """Send webhook notification for critical/high findings."""

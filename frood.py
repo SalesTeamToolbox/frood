@@ -222,6 +222,9 @@ class Frood:
         # ── Security scanner ─────────────────────────────────────────────
         self.security_scanner = ScheduledSecurityScanner(
             workspace_path=str(workspace),
+            github_issues_enabled=settings.security_scan_github_issues,
+            interval_seconds=settings.get_security_scan_interval_seconds(),
+            min_severity=settings.security_scan_min_severity,
         )
 
         # ── Custom tools (plugins) ───────────────────────────────────────

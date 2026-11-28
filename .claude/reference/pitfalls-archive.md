@@ -1,4 +1,4 @@
-# Common Pitfalls Archive (1-124)
+# Common Pitfalls Archive (1-125)
 
 Resolved pitfalls from earlier development. Loaded on-demand when debugging or
 working on areas covered by these entries.
@@ -129,3 +129,4 @@ working on areas covered by these entries.
 | 122 | GSD | `gsd-tools.cjs` resolves `project_root` to parent repo (frood) when working in nested repos with their own `.git/` (e.g. `apps/meatheadgear/`) | GSD planning for nested app repos must be done manually or with `cd` to the app directory first. GSD needs a fix to detect and respect nested git roots |
 | 123 | Status | System RAM showed `0 / 0 MB` on Windows — `memory_total_mb` and `memory_available_mb` were hardcoded to 0 in heartbeat | Use `GlobalMemoryStatusEx` on Windows, `/proc/meminfo` on Linux to populate system memory fields |
 | 124 | Frontend | `/api/tasks` endpoint removed in v2.0 but frontend `loadTasks()` still called it — caused 404 on every page load | Replace `await api("/tasks")` with `state.tasks = []` (tasks are project-scoped now) |
+| 125 | Security | `ScheduledSecurityScanner._report_to_github` ran `gh issue create/comment/close` from `self._workspace` on every scan with full findings, and `frood.py` built the scanner without wiring `SECURITY_SCAN_GITHUB_ISSUES` (constructor defaulted to `True`), so findings were posted to the public repo by default and success was logged even when `gh` failed | Wire `github_issues_enabled`, `interval_seconds` and `min_severity` from settings in `frood.py`; default `github_issues_enabled` to `False`; add `_repo_is_private()` fail-closed guard (PRIVATE/INTERNAL only, once per scan, cached WARNING per (repo, visibility)) inside `_report_to_github` and all three write methods; return booleans from writes and log Created/Updated/Closed only on exit 0, with stderr cut to 300 chars on failure |
