@@ -26,6 +26,11 @@ NV_IDS = [
     "qwen/qwen3-coder-480b-a35b-instruct",
 ]
 
+# Distinctive fake token for launch-path tests: short substrings like "tok" also
+# match checkout paths (e.g. a worktree named "...-tokens"), so leak assertions
+# must name this exact value. (No `sk-` prefix on purpose: secret scanners flag it.)
+FAKE_TOKEN = "FAKE_GATEWAY_TOKEN_7f3a9c41"
+
 
 def _patch_fetch(monkeypatch, health, models_status, models_data=None, models_body=""):
     def fetch(url, headers, timeout=5.0):
@@ -328,7 +333,7 @@ def test_no_check_skips_tier_list_for_nvidia(monkeypatch, capsys):
 
 
 def _setup_launch_mocks(monkeypatch, models=GO_IDS):
-    monkeypatch.setattr(launcher, "ensure_token", lambda p=None: "tok")
+    monkeypatch.setattr(launcher, "ensure_token", lambda p=None: FAKE_TOKEN)
     _patch_fetch(monkeypatch, 200, 200, {"data": [{"id": m} for m in models]})
     monkeypatch.setattr(launcher, "find_claude", lambda env: "/usr/bin/claude")
     monkeypatch.setattr(launcher.shutil, "which", lambda cmd, path=None: None)
@@ -351,7 +356,7 @@ def test_launch_here_execvpe_clean_env(monkeypatch, capsys):
     assert file == "/usr/bin/claude"
     assert args == ["/usr/bin/claude"]
     assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8000/gw"
-    assert env["ANTHROPIC_AUTH_TOKEN"] == "tok"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == FAKE_TOKEN
     for key in (
         "ANTHROPIC_API_KEY",
         "CLAUDECODE",
@@ -388,8 +393,12 @@ def test_launch_new_terminal_no_token_in_argv_or_env(monkeypatch, capsys):
     assert cmd[0] == "xdg-terminal-exec"
     assert "--here" in cmd
     joined = " ".join(cmd)
-    assert "tok" not in joined
+    assert FAKE_TOKEN not in joined
+    for element in cmd:
+        assert FAKE_TOKEN not in element, element
     assert env is not None
+    for value in env.values():
+        assert FAKE_TOKEN not in value, value
     assert "ANTHROPIC_AUTH_TOKEN" not in env
     assert "ANTHROPIC_BASE_URL" not in env
     out = capsys.readouterr().out
