@@ -457,7 +457,7 @@ topic: docs/atlas/desk.md
 
 ### oc-worker load-based slots
 handler: orchestrator/bin/slots.mjs (readSample, slotConfig, allowedSlots); orchestrator/bin/oc-worker.mjs acquireSlot; desk.mjs status header
-decides: how many workers may start now — fixed `WORKER_SLOTS=N` or dynamic `WORKER_SLOTS_MIN`..`WORKER_SLOTS_MAX` (2..6) from 5-minute machine load (/proc/pressure/cpu, /proc/loadavg, /proc/meminfo) via ORCH_PROC_ROOT; burst guard admits at most one slot above the floor per 60 s; opencode children nicened to 10 on non-Windows; decision log slot-decisions.log
+decides: how many workers may start now — fixed `WORKER_SLOTS=N` or dynamic `WORKER_SLOTS_MIN`..`WORKER_SLOTS_MAX` (2..10) from 5-minute machine load (/proc/pressure/cpu, /proc/loadavg, /proc/meminfo) via ORCH_PROC_ROOT; burst guard admits at most one slot above the floor per 20 s; opencode children nicened to 10 on non-Windows; decision log slot-decisions.log; the shared clear-state.json next to the slots holds machine-wide clear-since hysteresis so one process's not-clear resets everyone
 
 ### oc-worker cc-worker backend (headless Claude Code)
 handler: orchestrator/bin/oc-worker.mjs (`--agent cc-worker | cc-worker-strong | cc-critic | cc-senior`: ccModels, isCcAgent, isCcReader, ccSlotKey, ccModelFor, ccToolArgs, capReader, ccReaderWaitMin, CcSlotTimeout, claudeBin, CC_SETTINGS, summarizeClaude, detachRun, runChain pool key = the agent name); orchestrator/bin/pool-health.mjs (classify, ccResetMs, CC_PREFIX, isCcPool, markGroupDown, isDown, markUp); orchestrator/bin/oc-worker.mjs gateFree(); orchestrator/tests/fixtures/fake-claude.mjs; orchestrator/tests/oc-worker-cc-roles.test.mjs
