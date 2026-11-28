@@ -25,6 +25,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -507,3 +508,60 @@ class TestReceiptOrder:
         assert any(l.startswith("exit_code: 0") for l in lines)
         assert any(l.startswith("tests_source: board-ticket") for l in lines)
         assert any(l.startswith("tests: orchestrator/tests/x.test.mjs") for l in lines)
+
+
+class TestVenvPython:
+    """Venv-first pytest interpreter selection (pass bars 1 and 2)."""
+
+    def test_venv_python_used_when_present(self, tmp_path):
+        ticket = "py-ticket"
+        bin_dir = tmp_path / "bin"
+        make_stub_ruff(bin_dir)
+        reports_root = tmp_path / "reports"
+        marker = tmp_path / "stub-called"
+        repo = make_fixture(
+            tmp_path,
+            ticket,
+            tracked_files={"tests/test_py-ticket.py": PASS_PY},
+        )
+        # Add an executable .venv/bin/python stub after the repo exists.
+        venv_bin = repo / ".venv" / "bin"
+        stub = venv_bin / "python"
+        stub.parent.mkdir(parents=True)
+        # Stub records it was called, then execs the real interpreter of this test process.
+        stub.write_text(f'#!/bin/bash\necho {stub} >> {marker}\nexec {sys.executable} "$@"\n')
+        stub.chmod(0o755)
+        res = run_train(repo, ticket, bin_dir, reports_root)
+        assert res.returncode == 0, res.stderr
+        receipt = parse_receipt(reports_root, ticket)
+        assert receipt["status"] == "pass"
+        assert receipt["exit_code"] == "0"
+        assert receipt["tests_source"] == "python-convention"
+        assert receipt["tests"] == "tests/test_py-ticket.py"
+        assert receipt["python"] == str(repo / ".venv" / "bin" / "python")
+        # The stub was actually invoked by the train.
+        assert marker.exists()
+        assert str(repo / ".venv" / "bin" / "python") in marker.read_text()
+        assert (reports_root / ticket / "pytest.log").exists()
+
+    def test_python3_used_when_no_venv(self, tmp_path):
+        ticket = "py-ticket"
+        bin_dir = tmp_path / "bin"
+        make_stub_ruff(bin_dir)
+        reports_root = tmp_path / "reports"
+        repo = make_fixture(
+            tmp_path,
+            ticket,
+            tracked_files={"tests/test_py-ticket.py": PASS_PY},
+        )
+        # No .venv in the fixture -> train falls back to python3.
+        assert not (repo / ".venv").exists()
+        res = run_train(repo, ticket, bin_dir, reports_root)
+        assert res.returncode == 0, res.stderr
+        receipt = parse_receipt(reports_root, ticket)
+        assert receipt["status"] == "pass"
+        assert receipt["exit_code"] == "0"
+        assert receipt["tests_source"] == "python-convention"
+        assert receipt["tests"] == "tests/test_py-ticket.py"
+        assert receipt["python"] == "python3"
+        assert (reports_root / ticket / "pytest.log").exists()
