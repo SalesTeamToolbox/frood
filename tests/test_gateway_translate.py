@@ -670,5 +670,47 @@ def test_openai_error_to_anthropic_truncation():
     assert len(err["error"]["message"]) == 500
 
 
+# ---------------------------------------------------------------------------
+# gw-t3 carry-over (d): finish()/error() with an empty feed
+# ---------------------------------------------------------------------------
+
+
+def test_finish_before_feed_emits_message_start():
+    """GW-T3-d: finish() with no feed still opens with message_start."""
+    out = StreamTranslator("m").finish()
+    assert out.startswith(b"event: message_start")
+    assert b"event: message_stop" in out
+
+
+def test_error_before_feed_emits_message_start():
+    """GW-T3-d: error() with no feed still opens with message_start."""
+    out = StreamTranslator("m").error("x")
+    assert out.startswith(b"event: message_start")
+    assert b"event: error" in out
+
+
+def test_error_after_finish_emits_nothing():
+    """GW-T3-d: error() after finish() emits nothing (stream already closed)."""
+    tr = StreamTranslator("m")
+    tr.feed(b'data: {"choices": []}\n\n')
+    assert b"event: message_stop" in tr.finish()
+    assert tr.error("late") == b""
+
+
+def test_crlf_comment_matches_lf():
+    """GW-T3-d: CRLF-terminated SSE with a : comment line translates like LF."""
+    payload = {
+        "id": "a",
+        "choices": [{"index": 0, "delta": {"content": "Hi"}, "finish_reason": None}],
+    }
+    lf = ("data: " + json.dumps(payload) + "\n\n").encode() + b"data: [DONE]\n\n"
+    crlf = b": keep-alive\r\n" + lf.replace(b"\n", b"\r\n")
+    tr_lf = StreamTranslator("m")
+    out_lf = tr_lf.feed(lf) + tr_lf.finish()
+    tr_crlf = StreamTranslator("m")
+    out_crlf = tr_crlf.feed(crlf) + tr_crlf.finish()
+    assert _norm(out_crlf.decode()) == _norm(out_lf.decode())
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
