@@ -20,8 +20,14 @@ const FAKE = path.join(HERE, "fixtures", "fake-opencode.mjs");
 const BOARD_FIX = path.join(HERE, "fixtures", "board");
 
 const CLEAN = [];
+const SAVED_NO_INHIBIT = process.env.ORCH_NO_INHIBIT;
+const SAVED_INHIBIT_BIN = process.env.ORCH_INHIBIT_BIN;
 after(() => {
   for (const d of CLEAN) fs.rmSync(d, { recursive: true, force: true, maxRetries: 10 });
+  if (SAVED_NO_INHIBIT === undefined) delete process.env.ORCH_NO_INHIBIT;
+  else process.env.ORCH_NO_INHIBIT = SAVED_NO_INHIBIT;
+  if (SAVED_INHIBIT_BIN === undefined) delete process.env.ORCH_INHIBIT_BIN;
+  else process.env.ORCH_INHIBIT_BIN = SAVED_INHIBIT_BIN;
 });
 
 function tmp() {
@@ -61,6 +67,29 @@ function runWithWorkerEnv(config, extraEnv = {}) {
   });
   return { ...r, dir, argsFile };
 }
+
+// --------------------------------------------------------------------------- sleep inhibitor tripwire
+// Every oc-worker child inherits ORCH_NO_INHIBIT=1 and an ORCH_INHIBIT_BIN that points at this
+// tripwire script, so no test can start the real systemd-inhibit. The six inhibitor tests opt back
+// in explicitly (ORCH_NO_INHIBIT: "0" plus their own fake ORCH_INHIBIT_BIN); every other test keeps
+// ORCH_NO_INHIBIT=1 and the inhibitor is never spawned. If the tripwire file exists after the suite,
+// some non-inhibitor test started an inhibitor.
+const TRIPWIRE_DIR = tmp();
+CLEAN.push(TRIPWIRE_DIR);
+const TRIPWIRE_FILE = path.join(TRIPWIRE_DIR, "inhibit-tripwire.log");
+const TRIPWIRE_BIN = path.join(TRIPWIRE_DIR, "tripwire-inhibit.mjs");
+fs.writeFileSync(
+  TRIPWIRE_BIN,
+  `#!/usr/bin/env node\n` +
+  `import fs from "node:fs";\n` +
+  `const file = ${JSON.stringify(TRIPWIRE_FILE)};\n` +
+  `try { fs.appendFileSync(file, new Date().toISOString() + " inhibitor spawned: " + process.argv.slice(2).join(" ") + "\\n"); } catch {}\n` +
+  `process.exit(0);\n`,
+);
+fs.chmodSync(TRIPWIRE_BIN, 0o755);
+
+process.env.ORCH_NO_INHIBIT = "1";
+process.env.ORCH_INHIBIT_BIN = TRIPWIRE_BIN;
 
 test("worker env: a {state} value is created as a dir and passed; explicit env wins; no file changes nothing", () => {
   const r = runWithWorkerEnv({ ORCH_TEST_VAR: "{state}/ws", ORCH_TEST_PLAIN: "x" });
@@ -2934,7 +2963,7 @@ test("inhibitor: spawned with --what=idle:handle-lid-switch --mode=block; argv n
   const fake = fakeInhibit(dir);
   const prompt = path.join(dir, "mandate.md");
   fs.writeFileSync(prompt, "Review the diff.");
-  const r = run({ INHIBIT_RECORD_FILE: record, ORCH_INHIBIT_BIN: fake }, "--timeout-min", "1");
+  const r = run({ INHIBIT_RECORD_FILE: record, ORCH_INHIBIT_BIN: fake, ORCH_NO_INHIBIT: "0" }, "--timeout-min", "1");
   assert.equal(r.status, 0, r.stderr);
   const logged = waitForRecord(record);
   assert.ok(logged, "inhibitor never recorded");
@@ -2957,7 +2986,7 @@ test("inhibitor: --grace-min sets the duration (--timeout-min 1 --grace-min 2 =>
   const fake = fakeInhibit(dir);
   const prompt = path.join(dir, "mandate.md");
   fs.writeFileSync(prompt, "Review the diff.");
-  const r = run({ INHIBIT_RECORD_FILE: record, ORCH_INHIBIT_BIN: fake }, "--timeout-min", "1", "--grace-min", "2");
+  const r = run({ INHIBIT_RECORD_FILE: record, ORCH_INHIBIT_BIN: fake, ORCH_NO_INHIBIT: "0" }, "--timeout-min", "1", "--grace-min", "2");
   assert.equal(r.status, 0, r.stderr);
   const logged = waitForRecord(record);
   assert.ok(logged, "inhibitor never recorded");
@@ -2972,7 +3001,7 @@ test("inhibitor: pid released after a timed-out run", { skip: process.platform =
   const fake = fakeInhibit(dir);
   const prompt = path.join(dir, "mandate.md");
   fs.writeFileSync(prompt, "Review the diff.");
-  const r = run({ INHIBIT_RECORD_FILE: record, ORCH_INHIBIT_BIN: fake, FAKE_OC_MODE: "hang" }, "--timeout-min", "0.02");
+  const r = run({ INHIBIT_RECORD_FILE: record, ORCH_INHIBIT_BIN: fake, FAKE_OC_MODE: "hang", ORCH_NO_INHIBIT: "0" }, "--timeout-min", "0.02");
   assert.equal(r.status, 4, r.stderr);
   assert.equal(JSON.parse(r.stdout.trim()).exit, "timeout");
   const logged = waitForRecord(record);
@@ -2989,7 +3018,7 @@ test("inhibitor: pid released after SIGTERM to oc-worker", { skip: process.platf
   fs.writeFileSync(prompt, "Review the diff.");
   const out = path.join(dir, "out", "findings-r1.md");
   const child = spawn(process.execPath, [BIN, "--agent", "critic", "--dir", dir, "--prompt", prompt, "--out", out, "--timeout-min", "30"], {
-    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: dir, INHIBIT_RECORD_FILE: record, ORCH_INHIBIT_BIN: fake, FAKE_OC_MODE: "hang" },
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: dir, INHIBIT_RECORD_FILE: record, ORCH_INHIBIT_BIN: fake, FAKE_OC_MODE: "hang", ORCH_NO_INHIBIT: "0" },
     encoding: "utf8",
   });
   const hard = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 30000);
@@ -3025,7 +3054,7 @@ test("inhibitor: a throw in the setup gap releases the inhibitor and the slots (
   fs.chmodSync(outDir, 0o555);
   const out = path.join(outDir, "findings-r1.md");
   const child = spawn(process.execPath, [BIN, "--agent", "cc-critic", "--no-detach", "--dir", dir, "--prompt", prompt, "--out", out], {
-    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: dir, INHIBIT_RECORD_FILE: record, ORCH_INHIBIT_BIN: fake },
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: dir, INHIBIT_RECORD_FILE: record, ORCH_INHIBIT_BIN: fake, ORCH_NO_INHIBIT: "0" },
     encoding: "utf8",
   });
   const { code } = await new Promise((res) => child.on("close", (c) => res({ code: c })));
@@ -3061,8 +3090,15 @@ test("inhibitor: systemd-inhibit missing from PATH warns on stderr but the run s
   const record = path.join(dir, "inhibit.json");
   const prompt = path.join(dir, "mandate.md");
   fs.writeFileSync(prompt, "Review the diff.");
-  const r = run({ INHIBIT_RECORD_FILE: record, PATH: nodir }, "--timeout-min", "1");
+  const r = run({ INHIBIT_RECORD_FILE: record, PATH: nodir, ORCH_NO_INHIBIT: "0", ORCH_INHIBIT_BIN: path.join(nodir, "systemd-inhibit") }, "--timeout-min", "1");
   assert.equal(r.status, 0, r.stderr);
   assert.ok(!fs.existsSync(record), "inhibitor was spawned without systemd-inhibit");
   assert.match(r.stderr, /sleep inhibitor spawn failed/, r.stderr);
+});
+
+test("inhibitor: no non-inhibitor test may start the inhibitor (tripwire never fired)", () => {
+  assert.ok(
+    !fs.existsSync(TRIPWIRE_FILE),
+    "tripwire fired: a non-inhibitor test started an inhibitor",
+  );
 });
