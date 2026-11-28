@@ -23,6 +23,27 @@
 # per file. Files run serially, one at a time; the first failure stops
 # the run. Paths with spaces are not supported (Mandate tests: line).
 #
+# Box-wide suite lock: before the test gate, train.sh sources
+# $repo_root/orchestrator/ops/workstation/suite-lock.sh if it exists, else the
+# installed $HOME/.local/lib/frood-workstation/suite-lock.sh, else runs
+# unlocked and prints one stderr WARN. It takes the lock with
+# suite_lock_acquire "frood train $ticket ($repo_root)" immediately before the
+# test loop (lint stays outside it, because lint is cheap and must not queue)
+# and releases it on every exit path: an EXIT trap, plus TERM/INT traps that
+# kill a running test child first (TERM, wait up to 2 s, then KILL) and then
+# release and exit 143/130. While the lock is held, FROOD_SUITE_LOCK_HELD=1 is
+# exported to test children so a test that itself runs `make test` cannot
+# deadlock on the lock. If the caller already holds the lock
+# (FROOD_SUITE_LOCK_HELD=1 in the environment), acquire and release are skipped
+# entirely (same rule as the Makefile test target). SUITE_LOCK=0 keeps the
+# library's existing behaviour: it warns and takes no lock. Never fail the
+# train for a missing lock library.
+#
+# The receipt gains two lines next to tests_source: — suite_lock_wait_s: N
+# (wall seconds spent in acquire; 0 when skipped) and suite_lock:
+# held|skipped (FROOD_SUITE_LOCK_HELD)|skipped (SUITE_LOCK=0)|unlocked (no
+# lib).
+#
 # Exit codes: 0 = pass, 1 = test failure, 2 = lint failure.
 set -uo pipefail
 
@@ -37,6 +58,26 @@ if [ -x "$repo_root/.venv/bin/python" ]; then
   PYTEST_PYTHON="$repo_root/.venv/bin/python"
 else
   PYTEST_PYTHON="python3"
+fi
+
+# ── suite lock library (box-wide lock shared by every repo on this box) ──
+suite_lock_lib=""
+if [ -f "$repo_root/orchestrator/ops/workstation/suite-lock.sh" ]; then
+  suite_lock_lib="$repo_root/orchestrator/ops/workstation/suite-lock.sh"
+elif [ -n "${HOME:-}" ] && [ -f "$HOME/.local/lib/frood-workstation/suite-lock.sh" ]; then
+  suite_lock_lib="$HOME/.local/lib/frood-workstation/suite-lock.sh"
+fi
+
+# suite_lock_* state: set before the test gate and reported on the receipt.
+suite_lock_held=0            # 1 = we acquired the lock; only we release it
+suite_lock_wait_s=0          # wall seconds spent in acquire (0 when skipped)
+suite_lock_line="unlocked (no lib)"
+
+if [ -n "$suite_lock_lib" ]; then
+  # shellcheck source=../orchestrator/ops/workstation/suite-lock.sh
+  . "$suite_lock_lib"
+else
+  echo "train: WARN: suite-lock.sh not found — running the test gate without the box-wide lock" >&2
 fi
 
 REPORTS_ROOT="${FROOD_REPORTS_ROOT:-$HOME/.opencode/reports/frood-public}"
@@ -189,6 +230,126 @@ while IFS= read -r f; do
   fi
 done <<< "$tests_list"
 
+# child_pid is the pid of the test child currently running under the lock (the
+# timeout wrapper). GNU timeout does not forward signals to the command it
+# wraps, so the job is launched with job control (`set -m`), which gives it its
+# own process group; the TERM/INT traps signal -$child_pid, i.e. the whole
+# group, so the test process itself dies and none outlives train.sh.
+child_pid=""
+
+# suite_lock_in_play: set to 1 once we enter the acquire path (we have a queue
+# ticket and/or the lock itself). The EXIT/TERM/INT traps then call
+# suite_lock_release unconditionally: it guards on SUITE_LOCK_HELD internally,
+# so after acquire it releases held/, and mid-acquire (SUITE_LOCK_HELD still 0)
+# it removes the leftover queue ticket. Never call it when we never touched
+# the lock (SUITE_LOCK_HELD skipped, or no lib loaded).
+suite_lock_in_play=0
+
+# Release the suite lock exactly once: only when we are the ones who acquired
+# it (suite_lock_release also guards on SUITE_LOCK_HELD internally).
+release_our_lock() {
+  if [ "$suite_lock_in_play" = "1" ]; then
+    suite_lock_release
+    suite_lock_in_play=0
+    suite_lock_held=0
+  fi
+}
+
+# Kill a running test child (its whole process group, since timeout does not
+# forward signals), wait up to 2 s, KILL if still alive, then release the lock
+# and exit with the given code.
+kill_child_release_exit() {
+  local code="$1" i
+  if [ -n "$child_pid" ] && kill -0 "$child_pid" 2>/dev/null; then
+    kill -TERM -- "-$child_pid" 2>/dev/null || true
+    for i in 1 2; do
+      kill -0 "$child_pid" 2>/dev/null || break
+      sleep 1
+    done
+    if kill -0 "$child_pid" 2>/dev/null; then
+      kill -KILL -- "-$child_pid" 2>/dev/null || true
+    fi
+    wait "$child_pid" 2>/dev/null || true
+  fi
+  release_our_lock
+  exit "$code"
+}
+
+on_term() { kill_child_release_exit 143; }
+on_int()  { kill_child_release_exit 130; }
+# SIGHUP runs the EXIT trap too; handle it explicitly so the test child dies
+# before we release, and we exit 129 instead of silently continuing unlocked.
+on_hup()  { kill_child_release_exit 129; }
+
+trap 'on_term' TERM
+trap 'on_int' INT
+trap 'on_hup' HUP
+trap 'release_our_lock' EXIT
+
+# ── take the box-wide suite lock right before the test gate ─────────────
+# Lint (above) stays outside the lock: it is cheap and must not queue.
+# The timeouts (TRAIN_PYTEST_TIMEOUT / TRAIN_NODE_TIMEOUT) cover only the test
+# run, never the lock wait.
+if [ -n "$suite_lock_lib" ]; then
+  if [ "${FROOD_SUITE_LOCK_HELD:-0}" = "1" ]; then
+    # The caller already holds the lock: skip acquire and release entirely.
+    suite_lock_line="skipped (FROOD_SUITE_LOCK_HELD)"
+  else
+    suite_lock_in_play=1
+    lock_start="$(date +%s)"
+    if suite_lock_acquire "frood train $ticket ($repo_root)"; then
+      lock_end="$(date +%s)"
+      suite_lock_wait_s=$(( lock_end - lock_start ))
+      [ "$suite_lock_wait_s" -lt 0 ] && suite_lock_wait_s=0
+      if [ "${SUITE_LOCK:-1}" = "0" ]; then
+        # The library warned and took no lock.
+        suite_lock_line="skipped (SUITE_LOCK=0)"
+      else
+        suite_lock_line="held"
+        suite_lock_held=1
+        # Test children inherit this: a test that runs `make test` must not
+        # deadlock trying to take a lock we already hold.
+        export FROOD_SUITE_LOCK_HELD=1
+      fi
+    else
+      lock_rc=$?
+      write_receipt "test failure" 1 "$tests_receipt_lines
+suite_lock_wait_s: 0
+suite_lock: unlocked
+detail: suite lock unavailable (rc $lock_rc)"
+      echo "train: suite lock unavailable (rc $lock_rc)" >&2
+      exit 1
+    fi
+  fi
+fi
+
+tests_receipt_lines="$tests_receipt_lines
+suite_lock_wait_s: $suite_lock_wait_s
+suite_lock: $suite_lock_line"
+
+# Run one test file under the lock, in the background so a TERM/INT trap can
+# kill the child. `set -m` gives the background job its own process group, so
+# the trap addresses the whole group (-$child_pid) rather than just the
+# timeout wrapper (which does not forward signals).
+run_test_file() {
+  local f="$1" rc=0
+  set -m
+  case "$f" in
+    *.py)
+      timeout -k 10 "$TRAIN_PYTEST_TIMEOUT" "$PYTEST_PYTHON" -m pytest "$f" -q >>"$pytest_log" 2>&1 < /dev/null &
+      child_pid=$!
+      ;;
+    *.test.mjs|*.test.js)
+      timeout -k 10 "$TRAIN_NODE_TIMEOUT" node --test "$f" >>"$node_test_log" 2>&1 < /dev/null &
+      child_pid=$!
+      ;;
+  esac
+  set +m
+  wait "$child_pid"; rc=$?
+  child_pid=""
+  return $rc
+}
+
 # Run serially, one file at a time; the first failure stops the run.
 # Logs start empty each run, so a failure never dumps a previous run's output.
 : >"$pytest_log"
@@ -196,37 +357,30 @@ done <<< "$tests_list"
 while IFS= read -r f; do
   [ -z "$f" ] && continue
   case "$f" in
-    *.py)
-      if timeout -k 10 "$TRAIN_PYTEST_TIMEOUT" "$PYTEST_PYTHON" -m pytest "$f" -q >>"$pytest_log" 2>&1; then
-        :
-      else
-        rc=$?
+    *.py|*.test.mjs|*.test.js)
+      run_test_file "$f"; rc=$?
+      if [ "$rc" -ne 0 ]; then
         if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
-          detail="detail: pytest timed out after ${TRAIN_PYTEST_TIMEOUT}s: $f"
+          case "$f" in
+            *.py) detail="detail: pytest timed out after ${TRAIN_PYTEST_TIMEOUT}s: $f" ;;
+            *) detail="detail: node --test timed out after ${TRAIN_NODE_TIMEOUT}s: $f" ;;
+          esac
         elif [ "$tests_source" = "python-convention" ]; then
           detail=""  # keep today's behaviour: no detail on a plain pytest failure
         else
           detail="detail: test failed: $f"
         fi
         write_receipt "test failure" 1 "$detail"
-        cat "$pytest_log" >&2
-        echo "train: pytest failed (exit 1)" >&2
-        exit 1
-      fi
-      ;;
-    *.test.mjs|*.test.js)
-      if timeout -k 10 "$TRAIN_NODE_TIMEOUT" node --test "$f" >>"$node_test_log" 2>&1; then
-        :
-      else
-        rc=$?
-        if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
-          detail="detail: node --test timed out after ${TRAIN_NODE_TIMEOUT}s: $f"
-        else
-          detail="detail: test failed: $f"
-        fi
-        write_receipt "test failure" 1 "$detail"
-        cat "$node_test_log" >&2
-        echo "train: node --test failed (exit 1)" >&2
+        case "$f" in
+          *.py)
+            cat "$pytest_log" >&2
+            echo "train: pytest failed (exit 1)" >&2
+            ;;
+          *.test.mjs|*.test.js)
+            cat "$node_test_log" >&2
+            echo "train: node --test failed (exit 1)" >&2
+            ;;
+        esac
         exit 1
       fi
       ;;

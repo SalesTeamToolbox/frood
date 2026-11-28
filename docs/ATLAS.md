@@ -593,7 +593,7 @@ trap: the command doc is .claude/commands/frood-cc.md, installed by ops/install.
 
 ### ops/train.sh step 2 (pinned tests)
 handler: ops/train.sh
-decides: which tests the train runs for a ticket (python convention → board ticket blast_radius test → Mandate tests: line) or refuses it with exit 1; venv-first rule — pytest and ruff run from the checkout's .venv/bin/ when executable, else python3 / ruff on PATH; PATH is never changed
+decides: which tests the train runs for a ticket (python convention → board ticket blast_radius test → Mandate tests: line) or refuses it with exit 1; venv-first rule — pytest and ruff run from the checkout's .venv/bin/ when executable, else python3 / ruff on PATH; PATH is never changed; test gate under the box-wide suite lock; receipt suite_lock / suite_lock_wait_s
 
 ## Workstation (Linux)
 
