@@ -75,7 +75,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { gate } from "./verdict-gate.mjs";
 import { agentModel, isPolicyFree } from "./pool-health.mjs";
-import { matchAny, DENY, checkScope } from "./scope-check.mjs";
+import { matchAny, DENY, checkScope, diffFrom } from "./scope-check.mjs";
 import { sameStart } from "./proc-tree.mjs"; // process-start identity with a 3 s tolerance (design B7)
 class Refuse extends Error {} // exit 1: a rule said no, nothing was written
 class Usage extends Error {} // exit 2: usage, schema, or missing file
@@ -432,14 +432,22 @@ function trailingUncounted(rounds) {
   return n;
 }
 // senior is recomputed every round (design): the declared scope's guarded paths are never dropped (fail safe),
-// and the actual diff, a critic asking for it, and a third counted round can each add the requirement.
+// and the actual diff — taken from the scope fence's merge-base via diffFrom (exported by scope-check.mjs),
+// not the stale claim-time base_sha — a critic asking for it, and a third counted round can each add the
+// requirement.
 function recomputeSenior(t, adapter, wt, findingsText) {
   const reasons = seniorFor(t.scope, adapter).reasons;
   const counted = t.rounds.filter((r) => r.counted).length;
   if (counted > 2) reasons.push(`counted rounds ${counted} > 2`);
   if (findingsText && /^\s*SENIOR_REVIEW:\s*needed\b/im.test(findingsText)) reasons.push("critic: SENIOR_REVIEW needed");
   if (t.base_sha && wt) {
-    for (const p of (tryGit(wt, ["diff", "--name-only", t.base_sha, "HEAD"]) || "").split("\n").filter(Boolean)) {
+    // Diff from the scope fence's merge-base (diffFrom) instead of the claim-time base_sha: a branch that
+    // merged or rebased onto the adapter base ref diffs only its own changes, so guarded paths the base
+    // gained after base_sha no longer force senior. A merge conflict resolution that edits a guarded path
+    // still shows: it is in HEAD and not in the merge-base. diffFrom falls back to base_sha when the base
+    // ref does not resolve, preserving the old behaviour there.
+    const from = diffFrom(wt, t.base_sha, "HEAD", adapter.base);
+    for (const p of (tryGit(wt, ["diff", "--name-only", from, "HEAD"]) || "").split("\n").filter(Boolean)) {
       if (matchAny(p, adapter.guarded_paths)) reasons.push(`guarded path: ${p}`);
     }
   }

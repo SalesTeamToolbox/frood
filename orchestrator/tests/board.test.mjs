@@ -1411,6 +1411,47 @@ test("phase 2 case 13: senior is required by a critic, by a third counted round,
   assert.ok(r3.ticket.senior.reasons.includes("guarded path: ops/release.sh"), JSON.stringify(r3.ticket.senior.reasons));
 });
 
+test("round: guarded paths main gained after base_sha do not count when the branch merged main", () => {
+  const c = mk();
+  // scope bin/** (no guarded path); base_sha = claim-time main
+  workingTicket(c, "smerge");
+  commitFile(c, "bin/demo.mjs", "// in scope\n", "ticket: in-scope file"); // diverge the branch so the merge is real
+  commitInRepo(c, "ops/release.sh", "#!/bin/sh\nexit 0\n", "main: guarded file after claim"); // main gains a guarded path
+  git(c.wt, "merge", "-q", "main"); // feat/demo merges main
+  const sha = head(c);
+  const r = round(c, "smerge", { reviewed: sha });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.ticket.senior.required, false, JSON.stringify(r.ticket.senior.reasons));
+  assert.ok(!r.ticket.senior.reasons.some((x) => x.startsWith("guarded path:")), JSON.stringify(r.ticket.senior.reasons));
+});
+
+test("round: guarded paths main gained after base_sha do not count when the branch rebased onto main", () => {
+  const c = mk();
+  workingTicket(c, "srebase-onto-main");
+  commitFile(c, "bin/demo.mjs", "// in scope\n", "ticket: in-scope file");
+  commitInRepo(c, "ops/release.sh", "#!/bin/sh\nexit 0\n", "main: guarded file after claim");
+  git(c.wt, "rebase", "-q", "main"); // feat/demo replayed on the new main
+  const sha = head(c);
+  const r = round(c, "srebase-onto-main", { reviewed: sha });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.ticket.senior.required, false, JSON.stringify(r.ticket.senior.reasons));
+  assert.ok(!r.ticket.senior.reasons.some((x) => x.startsWith("guarded path:")), JSON.stringify(r.ticket.senior.reasons));
+});
+
+test("round: a guarded path the ticket itself edits still counts after merging main (main's own guarded change does not)", () => {
+  const c = mk();
+  workingTicket(c, "smerge-self");
+  commitFile(c, "bin/demo.mjs", "// in scope\n", "ticket: in-scope file");
+  commitInRepo(c, "ops/release.sh", "#!/bin/sh\nexit 0\n", "main: guarded file after claim"); // main's touch must NOT count
+  git(c.wt, "merge", "-q", "main");
+  commitFile(c, "ops/train.sh", "#!/bin/sh\nexit 1\n", "ticket: edits a different guarded path itself");
+  const sha = head(c);
+  const r = round(c, "smerge-self", { reviewed: sha });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.ticket.senior.required, true, JSON.stringify(r.ticket.senior.reasons));
+  assert.deepEqual(r.ticket.senior.reasons, ["guarded path: ops/train.sh"], JSON.stringify(r.ticket.senior.reasons));
+});
+
 test("ready: a critic-only SENIOR_REVIEW is refused without --senior-skip", () => {
   const c = mk();
   workingTicket(c, "rs1");
