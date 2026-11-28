@@ -5,18 +5,30 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { renderForHarness, addManagedHeader, render, MANAGED, REPO_FWD } from "../bin/install.mjs";
+import {
+  renderForHarness,
+  addManagedHeader,
+  render,
+  MANAGED,
+  REPO_FWD,
+  plan,
+  globalCollisions,
+} from "../bin/install.mjs";
+import { renderGlobal, globalPlan as globalPlanOps } from "../../ops/install.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const INSTALL = path.join(REPO, "bin", "install.mjs");
+// The Frood repo root (parent of the orchestrator dir) holds .claude/commands/frood-*.md.
+const FROOD_CMD_DIR = path.resolve(REPO, "..", ".claude", "commands");
 
 function freshHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "orch-home-"));
 }
 function run(home, ...args) {
   return spawnSync(process.execPath, [INSTALL, ...args], {
-    env: { ...process.env, ORCH_HOME: home, ORCH_SKIP_ROUTING: "1", ORCH_SKIP_WORKSTATION: "1" },
+    env: { ...process.env, ORCH_HOME: home, ORCH_SKIP_ROUTING: "1", ORCH_SKIP_WORKSTATION: "1", ORCH_SKIP_MCP: "1" },
     encoding: "utf8",
+    timeout: 30000,
   });
 }
 
@@ -468,3 +480,95 @@ test("no worker prompt carries the mail-server or worktree-finish blocks; instal
 function tmp2() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "ws-install-"));
 }
+
+// --------------------------------------------------------------- global /frood-* commands
+
+test("T1 global install writes every frood-*.md rendered by renderGlobal", () => {
+  const home = freshHome();
+  const first = run(home);
+  assert.equal(first.status, 0, first.stderr + first.stdout);
+  const files = fs.readdirSync(FROOD_CMD_DIR).filter((f) => /^frood-.*\.md$/.test(f)).sort();
+  assert.ok(files.length > 0, "repo ships frood-*.md commands");
+  for (const f of files) {
+    const source = fs.readFileSync(path.join(FROOD_CMD_DIR, f), "utf8");
+    const want = renderGlobal(source);
+    const have = fs.readFileSync(path.join(home, ".claude", "commands", f), "utf8");
+    assert.equal(have, want, `${f} global copy equals renderGlobal(source)`);
+  }
+  assert.match(first.stdout, /global: \d+ \/frood-\* command\(s\) written/);
+});
+
+test("T2 --check detects global drift: differs then missing", () => {
+  const home = freshHome();
+  assert.equal(run(home).status, 0);
+  const files = fs.readdirSync(FROOD_CMD_DIR).filter((f) => /^frood-.*\.md$/.test(f)).sort();
+  assert.ok(files.length >= 2, "need at least two frood-*.md commands");
+  const edited = path.join(home, ".claude", "commands", files[0]);
+  const deleted = path.join(home, ".claude", "commands", files[1]);
+  fs.appendFileSync(edited, "\n// hand edit\n");
+  fs.rmSync(deleted);
+  const drift = run(home, "--check");
+  assert.equal(drift.status, 1, drift.stderr + drift.stdout);
+  assert.match(drift.stdout, new RegExp(`DRIFT differs: .*${files[0]}`));
+  assert.match(drift.stdout, /global check: FAILED/);
+  assert.match(drift.stdout, new RegExp(`DRIFT missing: .*${files[1]}`));
+});
+
+test("T3 --dry-run lists global creates and writes nothing", () => {
+  const home = freshHome();
+  const r = run(home, "--dry-run");
+  assert.equal(r.status, 0);
+  assert.ok(r.stdout.includes(`${home}/.claude/commands/frood-board.md`), "lists frood-board.md create: " + r.stdout);
+  assert.match(r.stdout, /would create .*\.claude\/commands\/frood-board\.md/);
+  assert.match(r.stdout, /global: \d+ \/frood-\* command\(s\) would be written/);
+  assert.ok(!fs.existsSync(path.join(home, ".claude")), ".claude must not exist after dry run");
+});
+
+test("T4 second install leaves globals up to date, no orphan, globals not in state", () => {
+  const home = freshHome();
+  const prevHome = process.env.ORCH_HOME;
+  process.env.ORCH_HOME = home;
+  try {
+    const first = run(home);
+    assert.equal(first.status, 0, first.stderr + first.stdout);
+    const files = fs.readdirSync(FROOD_CMD_DIR).filter((f) => /^frood-.*\.md$/.test(f)).sort();
+    const before = Object.fromEntries(
+      files.map((f) => [f, fs.readFileSync(path.join(home, ".claude", "commands", f), "utf8")]),
+    );
+    const second = run(home);
+    assert.equal(second.status, 0, second.stderr + second.stdout);
+    assert.match(second.stdout, /global: \/frood-\* commands up to date/);
+    assert.doesNotMatch(second.stdout, /orphan/);
+    for (const f of files) {
+      assert.equal(
+        fs.readFileSync(path.join(home, ".claude", "commands", f), "utf8"),
+        before[f],
+        `${f} byte-equal across runs`,
+      );
+    }
+    const statePath = path.join(home, ".config", "orchestrator", "installed.json");
+    const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
+    const globalTargets = globalPlanOps().map((p) => p.target);
+    for (const t of globalTargets) assert.ok(!state.files.includes(t), `${t} not in installed state files`);
+    assert.equal(run(home, "--check").status, 0, "--check clean after second install");
+  } finally {
+    if (prevHome === undefined) delete process.env.ORCH_HOME;
+    else process.env.ORCH_HOME = prevHome;
+  }
+});
+
+test("T5 globalCollisions is empty for the real repo and detects shared targets", () => {
+  const prevHome = process.env.ORCH_HOME;
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "orch-collide-"));
+  process.env.ORCH_HOME = sandbox;
+  try {
+    const orchTargets = plan().map((i) => i.target);
+    const globalTargets = globalPlanOps().map((p) => p.target);
+    assert.deepEqual(globalCollisions(orchTargets, globalTargets), []);
+  } finally {
+    fs.rmSync(sandbox, { recursive: true, force: true });
+    if (prevHome === undefined) delete process.env.ORCH_HOME;
+    else process.env.ORCH_HOME = prevHome;
+  }
+  assert.deepEqual(globalCollisions(["/a", "/b"], ["/b", "/c"]), ["/b"]);
+});

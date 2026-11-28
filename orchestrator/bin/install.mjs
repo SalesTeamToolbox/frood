@@ -3,8 +3,10 @@
 // The source of truth is the Frood repo's `orchestrator/` directory (this tree). Edit here, run
 // install; never hand-edit the installed copies (they are overwritten).
 //
-//   node bin/install.mjs            install (backs up anything it overwrites or removes)
-//   node bin/install.mjs --check    report drift; exit 1 if any installed file differs/missing/orphaned
+//   node bin/install.mjs            install (also refreshes the Frood global /frood-* commands
+//                                   from .claude/commands/ into <home>/.claude/commands/)
+//   node bin/install.mjs --check    report drift; exit 1 if any installed file differs/missing/orphaned,
+//                                   including the global /frood-* command copies
 //   node bin/install.mjs --dry-run  show what install would do, write nothing
 //
 // Install also registers the peer-mail MCP server with Claude Code at user scope (bin/mcp-register.mjs) when Claude
@@ -18,6 +20,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { registerPeerMail, peerMailDrift } from "./mcp-register.mjs";
+import { installGlobal, checkGlobal, globalPlan } from "../../ops/install.mjs";
 
 export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HARNESSES = ["cc", "oc"];
@@ -213,6 +216,25 @@ export function install({ dryRun = false, log = console.log } = {}) {
   // Not a file this install owns: Claude Code's user-scope MCP list. Never fails the install.
   const mcp = process.env.ORCH_SKIP_MCP ? "skipped" : registerPeerMail({ home: homeDir(), dryRun, log });
   return { changes: changes.length, orphans: orphans.length, mcp };
+}
+
+// Pure intersection of the orchestrator install targets and the global /frood-* command targets.
+// Both installers write <home>/.claude/commands/, so they must never share a target.
+export function globalCollisions(orchTargets, globalTargets) {
+  const wanted = new Set(globalTargets);
+  return [...orchTargets].filter((t) => wanted.has(t)).sort();
+}
+
+// Log what `installGlobal()` would do without writing anything (it mkdirs the commands dir).
+export function planGlobalCommands({ log = console.log } = {}) {
+  let n = 0;
+  for (const p of globalPlan()) {
+    if (p.state === "ok") continue;
+    log(`would ${p.state === "missing" ? "create" : "update"} ${p.target}`);
+    n++;
+  }
+  log(n ? `global: ${n} /frood-* command(s) would be written` : "global: /frood-* commands up to date");
+  return n;
 }
 
 export function check({ log = console.log } = {}) {
@@ -451,14 +473,30 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       uninstallWorkstation();
       process.exit(0);
     }
+    // Collision guard: the orchestrator install and the global /frood-* install share
+    // <home>/.claude/commands/, so they must never target the same file. Computed before
+    // any write or check, in every mode (install, --dry-run, --check).
+    const orchTargets = plan().map((i) => i.target);
+    const globalTargets = globalPlan().map((p) => p.target);
+    const collisions = globalCollisions(orchTargets, globalTargets);
+    if (collisions.length) throw new Error(`both installers write ${collisions.join(", ")}`);
+
     if (args.has("--check")) {
       const mainOk = check();
+      const globalOk = checkGlobal();
       const wsOk = checkWorkstation().ok;
-      const ok = mainOk && wsOk;
+      const ok = mainOk && globalOk && wsOk;
       process.exit(ok ? 0 : 1);
     }
-    install({ dryRun: args.has("--dry-run") });
-    installWorkstation({ dryRun: args.has("--dry-run") });
+    if (args.has("--dry-run")) {
+      install({ dryRun: true });
+      planGlobalCommands();
+      installWorkstation({ dryRun: true });
+    } else {
+      install();
+      installGlobal();
+      installWorkstation();
+    }
   } catch (err) {
     console.error(`install: ${err.message}`);
     process.exit(2);
