@@ -565,7 +565,7 @@ decides: install.mjs fills @PATH@ at install time (node's directory first, then 
 
 ### ops/train.sh step 2 (pinned tests)
 handler: ops/train.sh
-decides: which tests the train runs for a ticket (python convention → board ticket blast_radius test → Mandate tests: line) or refuses it with exit 1
+decides: which tests the train runs for a ticket (python convention → board ticket blast_radius test → Mandate tests: line) or refuses it with exit 1; test gate under the box-wide suite lock; receipt suite_lock / suite_lock_wait_s
 
 ## Workstation (Linux)
 
