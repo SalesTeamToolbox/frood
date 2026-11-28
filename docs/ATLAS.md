@@ -511,6 +511,11 @@ decides: an idle holder session is "waiting on you" (notice text + `Open session
 sibling traps: orchestrator/bin/desk.mjs (holder paging, `pageOrphanOrParent`, `cmdResolve`, sweepOrphans, pruneOrphanLedger, status), orchestrator/bin/launch-config.mjs ({session} substitution)
 trap: an idle Claude Code holder is alive but unreachable by peer-mail, so the page is right to fire but its text must say "waiting on you", not "no live session"
 
+### desk session-driven guard
+handler: orchestrator/bin/desk.mjs sessionDriven() (the act-layer guard; callers actOn, verdictFlow and sweepVerdicts), orchestrator/bin/desk.mjs doCritic() and the critic -alt retry (findings-hashed refusal), orchestrator/bin/desk.mjs doResume() and doCritic() (board-final refusal)
+decides: whether the desk acts on a run a live session drives — a run whose ticket.json has `"driver": "session"` or whose board ticket has a native-critic round returns `session-driven` (no spawn, no ack) instead of ACTION critic / resume-worker / merge; a run whose board ticket already hashed the target findings file refuses with `findings-hashed` (one page, no write); a run whose board ticket is ready/shipped/closed or signed off returns `board-final` (no spawn, no page); a live held_session or assignment.session alone never stops the desk
+topic: docs/atlas/desk.md
+
 ### Claude plan-usage snapshots
 handler: orchestrator/bin/cc-usage.mjs (normalizeApp, normalizeStatusline, store, importStatusline; CLI snapshot/latest)
 decides: the normalized Claude Code 5-hour / weekly / Fable usage record and which snapshot is the latest (newest `at` wins across sources `app` and `statusline`); history in `<orchDir()>/cc-usage.jsonl` pruned past 8 weeks

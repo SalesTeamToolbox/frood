@@ -251,6 +251,11 @@ by **worker** agents and checked by a **critic** agent. Roles, agents and models
 in `~/.config/opencode/rules/01-orchestrator-models.md` (OpenCode loads it; in Claude
 Code, read it before dispatching). Spawn the named agent — never hand-type a model.
 
+0. **Claim first — before the first `board create` or dispatch**, run the lease-guard claim for the
+stream (Standing rules): without the claim the desk cannot mail this session its escalations. A run
+this session drives itself (its own critic and merge) gets `"driver": "session"` in its `ticket.json`
+(or is launched without `--stream`); otherwise the desk daemon drives it too.
+
 1. **Ticket + Mandate** (on the board when the repo has one, `.opencode/board/`):
    scope, files the worker may touch, pass bars, exact test command, worktree + branch,
    `report_path` and `findings_path` under `.opencode/reports/<ticket>/`.

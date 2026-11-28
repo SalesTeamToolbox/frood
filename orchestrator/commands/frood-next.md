@@ -33,7 +33,8 @@ The tab title is set by the `orchestrator-handoff.js` hook to `[<stream>] <repo>
      register it as a stream before doing anything else - steps 4-5 of `/frood-ticket` - writing the Mandate
      (`<repo>/.opencode/reports/<id>/mandate.md`) and the plan file from the ticket's content first when it is
      hand-written or has no Mandate yet, then `handoff.mjs write --stream <id> …`. Then continue at step 3 (claim it).
-3. Claim the stream lease before reading the plan. The holder is the harness, not the session:
+3. Claim the stream lease before reading the plan. Without the claim the desk cannot mail this session
+   its escalations. The holder is the harness, not the session:
    <!-- cc-only -->
    `node {{ORCH_REPO}}/bin/handoff.mjs claim --stream <name> --by cc --session <your peer-mail session id>`
    (the id injected at session start, "your session id for the peer_* messaging tools is ..."). `--session` is

@@ -1034,6 +1034,127 @@ function boardRounds(ticket, slug) {
   return { counted, lap, has: (sha) => b.rounds.some((r) => r.counted && r.reviewed_sha === sha) };
 }
 
+// The board ticket for a desk run (slug + repo from its ticket.json), or null when it cannot be read.
+// Never throws: a missing board, a missing repo, or an unreadable file all read as "no board ticket".
+function boardTicketFor(ticket) {
+  try {
+    const slug = ticket && typeof ticket.ticket === "string" && ticket.ticket ? ticket.ticket : null;
+    const repo = ticket && typeof ticket.repo === "string" && ticket.repo ? ticket.repo : null;
+    if (!slug || !repo) return null;
+    const b = JSON.parse(fs.readFileSync(path.join(repo, ".opencode", "board", "tickets", `${slug}.json`), "utf8"));
+    return b && typeof b === "object" && !Array.isArray(b) ? b : null;
+  } catch {
+    return null;
+  }
+}
+
+// A run a live session drives itself: the desk daemon must not run its own critic/worker resume loop on
+// it (the double-loop of 2026-11-27: a second critic in parallel with the orchestrator's native one, a
+// resume onto a signed-off branch, a scope refit that deleted tests). Never throws: unreadable state
+// reads as not driven. A run is session-driven when either of these holds:
+// (1) its ticket.json carries `"driver": "session"` — the orchestrator writes it once, before the first
+// dispatch, when the session will run the critic and the merge for that run itself; (2) its board ticket
+// has a recorded round whose critic ran natively (`critic.source === "native"`, what board.mjs stores at
+// ~:1057-1071 for `board round --native-critic`; a literal `native_critic`/`native-critic` round field is
+// accepted too) — so a session is running its own critic.
+// A live `held_session` or a live `assignment.session` does NOT make a run session-driven: every
+// orchestrator claims its stream and hands its `--stream` runs to the desk by design, so keying on the
+// claim would stop the desk driving every normal run.
+export function sessionDriven(stream, ticketPath) {
+  try {
+    if (typeof ticketPath !== "string" || !ticketPath) return { driven: false, why: "" };
+    let t = null;
+    try {
+      t = JSON.parse(fs.readFileSync(ticketPath, "utf8"));
+    } catch {
+      return { driven: false, why: "" };
+    }
+    if (!t || typeof t !== "object" || Array.isArray(t)) return { driven: false, why: "" };
+    if (t.driver === "session") return { driven: true, why: `ticket.json driver=session (${ticketPath})` };
+    const b = boardTicketFor(t);
+    if (b && Array.isArray(b.rounds)) {
+      const native = b.rounds.find((r) => {
+        if (!r || typeof r !== "object") return false;
+        const c = r.critic;
+        if (c && typeof c === "object" && c.source === "native") return true;
+        return r.native_critic != null || r["native-critic"] != null;
+      });
+      if (native) return { driven: true, why: `board round ${native.n ?? "?"} ran a native critic` };
+    }
+  } catch {
+    // fall through to not driven
+  }
+  return { driven: false, why: "" };
+}
+
+// Board-final: the run's board ticket reached `ready`/`shipped`/`closed`, or it carries a live (not
+// invalidated by a later round) signoff record — resuming or re-criticising it would replay settled work
+// (2026-11-27: a resume committed onto a signed-off branch). Never throws: no board ticket reads as open.
+function boardFinalOf(ticket) {
+  try {
+    const b = boardTicketFor(ticket);
+    if (!b) return { final: false, why: "" };
+    const slug = typeof ticket?.ticket === "string" ? ticket.ticket : "?";
+    if (b.stage === "ready" || b.stage === "shipped" || b.stage === "closed") {
+      return { final: true, why: `board ${slug} is ${b.stage}` };
+    }
+    if (Array.isArray(b.signoffs) && b.signoffs.some((s) => s && typeof s === "object" && s.invalidated_by == null)) {
+      return { final: true, why: `board ${slug} has a signoff` };
+    }
+  } catch {
+    // fall through to not final
+  }
+  return { final: false, why: "" };
+}
+
+// Findings-hashed: the board already recorded this exact findings file — a round whose critic's
+// `findings_sha256` matches the file's current sha256, or a round carrying the findings path itself
+// (older board shapes). Rewriting or re-reviewing it would overwrite the hashed record the board keeps
+// (2026-11-27: the desk overwrote findings-r<N>.md after `board round` hashed it). Never throws.
+function findingsRecorded(ticket, findingsPath) {
+  try {
+    if (!ticket || typeof findingsPath !== "string" || !findingsPath) return { hashed: false, why: "" };
+    const b = boardTicketFor(ticket);
+    if (!b || !Array.isArray(b.rounds)) return { hashed: false, why: "" };
+    let sha = null;
+    try {
+      sha = crypto.createHash("sha256").update(fs.readFileSync(findingsPath)).digest("hex");
+    } catch {
+      sha = null;
+    }
+    const abs = path.resolve(findingsPath);
+    for (const r of b.rounds) {
+      if (!r || typeof r !== "object") continue;
+      const c = r.critic && typeof r.critic === "object" ? r.critic : null;
+      if (sha && c && c.findings_sha256 === sha) {
+        return { hashed: true, why: `round ${r.n ?? "?"} recorded sha256 of ${findingsPath}` };
+      }
+      for (const f of [r.findings, c?.findings]) {
+        if (typeof f === "string" && f) {
+          let fab = null;
+          try {
+            fab = path.resolve(f);
+          } catch {
+            fab = null;
+          }
+          if (fab && fab === abs) return { hashed: true, why: `round ${r.n ?? "?"} recorded ${findingsPath}` };
+        }
+      }
+    }
+  } catch {
+    // fall through to not hashed
+  }
+  return { hashed: false, why: "" };
+}
+
+// The ticket.json a resume command's `--out` belongs to: dirname(out)/ticket.json, the same derivation
+// oc-worker.mjs uses. Null when the command names no out (the resume-unparseable path stays as today).
+function resumeTicketPath(cmd) {
+  const m = /--out ([\s\S]+) --session /.exec(typeof cmd === "string" ? cmd : "");
+  if (!m) return null;
+  return path.join(path.dirname(m[1]), "ticket.json");
+}
+
 // The scope fence inputs for a run: the board ticket's `base_sha` + `scope` — the authoritative pair, since the
 // board is what gates `round` and `ready` — falling back to the desk ticket's own `base`/`scope` fields. Null when
 // neither names a base and a scope (a repo without a board, or a ticket older than the fence): no fence, as today.
@@ -1805,13 +1926,29 @@ export async function handleEvent(stream, key, by) {
 
 // The stored decision, executed. Split from handleEvent so the completion wake-up below runs on
 // every branch (critic, resume, merge, escalation) instead of being duplicated per call site.
+// A run a live session drives itself is never executed here: `ACTION critic`, `ACTION resume-worker`
+// and `ESCALATE merge` return `session-driven` with no spawn and no ack — the unresolved decision stays,
+// so the event is still there when the session lets go. Escalation mail to the holder (wakeHolder) and
+// orphan paging are unchanged.
 async function actOn(stream, key, events, line) {
   let m = /^ACTION critic (\S+) (\S+) (\S+) (\d+)$/.exec(line);
-  if (m) return await doCritic(stream, key, events, m[1], m[2], m[3], Number(m[4]));
+  if (m) {
+    const sd = sessionDriven(stream, m[1]);
+    if (sd.driven) return { stream, key, line, outcome: "session-driven", detail: sd.why };
+    return await doCritic(stream, key, events, m[1], m[2], m[3], Number(m[4]));
+  }
   m = /^ACTION resume-worker (.+)$/.exec(line);
-  if (m) return await doResume(stream, key, events, m[1]);
+  if (m) {
+    const sd = sessionDriven(stream, resumeTicketPath(m[1]));
+    if (sd.driven) return { stream, key, line, outcome: "session-driven", detail: sd.why };
+    return await doResume(stream, key, events, m[1]);
+  }
   m = /^ESCALATE merge (\S+) ?(\S*)$/.exec(line);
-  if (m) return doMerge(stream, key, m[1], m[2]);
+  if (m) {
+    const sd = sessionDriven(stream, m[1]);
+    if (sd.driven) return { stream, key, line, outcome: "session-driven", detail: sd.why };
+    return doMerge(stream, key, m[1], m[2]);
+  }
   dpage(stream, key, line);
   return { stream, key, line, outcome: "paged" };
 }
@@ -1901,6 +2038,11 @@ async function verdictFlow(stream, key, state) {
   const ev = events.get(key) ?? {};
   const findings = ev.out ?? "";
   const verdictKey = `verdict:${run}`;
+  // The session's own critic review is not the desk's to verdict: a session-driven run returns here with
+  // no verdict event, no ack and no spawn — the run-done stays for when the session lets go.
+  const firstQueued = events.get(`run:${run}:queued`) ?? {};
+  const sd = sessionDriven(stream, typeof firstQueued.ticket === "string" ? firstQueued.ticket : null);
+  if (sd.driven) return { stream, key, line: "", outcome: "session-driven", detail: sd.why };
   if (latestVerdict(events, run)) return { stream, key, line: verdictKey, outcome: "noop" };
   let text = null;
   try {
@@ -1938,6 +2080,13 @@ async function verdictFlow(stream, key, state) {
     return { stream, key, line: "", outcome: "noop" };
   }
   if ((state.retries[retryId] ?? 0) < 1 && ticket?.worktree && alt) {
+    // The -alt target the board already hashed is not retried: re-reviewing it would overwrite the
+    // hashed record. Page once and write nothing (no spawn, no verdict, no ack).
+    const altHashed = findingsRecorded(ticket, alt);
+    if (altHashed.hashed) {
+      dpage(stream, key, `findings-hashed ${alt}`);
+      return { stream, key, line: "", outcome: "findings-hashed", detail: altHashed.why };
+    }
     state.retries[retryId] = (state.retries[retryId] ?? 0) + 1;
     writeDaemonState(state);
     if (DAEMON_DRY()) return { stream, key, line: "retry critic", outcome: "critic-retry" };
@@ -1972,6 +2121,17 @@ async function doCritic(stream, key, events, ticketPath, out, findings, round) {
   if (!ticket?.mandate || !ticket.worktree) {
     dpage(stream, key, `no-ticket ${ticketPath}`);
     return { stream, key, line: "", outcome: "paged" };
+  }
+  // Board-final: the ticket is ready/shipped/closed or signed off — nothing left to criticise.
+  // No spawn, no page: the settled ticket stays settled.
+  const final = boardFinalOf(ticket);
+  if (final.final) return { stream, key, line: "", outcome: "board-final", detail: final.why };
+  // Findings-hashed: the board already recorded this exact findings file. Neither the scope-fence
+  // write below nor the critic launch may touch it. Page once and write nothing.
+  const hashed = findingsRecorded(ticket, findings);
+  if (hashed.hashed) {
+    dpage(stream, key, `findings-hashed ${findings}`);
+    return { stream, key, line: "", outcome: "findings-hashed", detail: hashed.why };
   }
   // Scope fence: a worker whose diff leaves the ticket's `--scope` (or touches
   // the deny list) never gets a critic. Synthetic CHANGES_REQUESTED findings go
@@ -2069,6 +2229,11 @@ async function awaitQueued(stream, run, timeoutMs = Number(process.env.ORCH_AWAI
 // The resume line is re-derived by step, so the daemon only spawns what is not already queued (no duplicates even
 // when the ack replays before oc-worker writes its queued event).
 async function doResume(stream, key, events, cmd) {
+  // Board-final: the ticket is ready/shipped/closed or signed off — a resume would replay settled work
+  // (2026-11-27: a resume committed onto a signed-off branch). No spawn, no page.
+  const resumeTicket = resumeTicketPath(cmd);
+  const resumeFinal = resumeTicket ? boardFinalOf(readTicket(resumeTicket)) : { final: false, why: "" };
+  if (resumeFinal.final) return { stream, key, line: "", outcome: "board-final", detail: resumeFinal.why };
   const m = /--out ([\s\S]+) --session /.exec(cmd);
   let rrun = null;
   if (m) {
@@ -2158,6 +2323,9 @@ async function sweepVerdicts(opts = {}) {
       if (ev.kind !== "run-done" || !isCriticAgent(ev.agent)) continue;
       const vkey = `verdict:${ev.run}`;
       if (!ev.run || events.has(vkey)) continue;
+      // A session-driven run's critic run-done is the session's own review: never a desk verdict.
+      const q = events.get(`run:${ev.run}:queued`);
+      if (sessionDriven(s.name, q && typeof q.ticket === "string" ? q.ticket : null).driven) continue;
       await verdictFlow(s.name, k, state);
     }
   }
