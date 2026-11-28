@@ -606,6 +606,10 @@ sibling traps: oc-worker load-based slots
 handler: orchestrator/ops/workstation/suite-lock.sh suite_lock_acquire / suite_lock_release
 decides: one pinned full suite at a time across every repo sharing one box-wide SUITE_LOCK_ROOT queue (arrival-order, heartbeat, two-read stale break, token-checked release); `suite_lock_acquire` fails fast (return 2, ERROR line) when the lock root cannot be placed (unset SUITE_LOCK_ROOT/HOME and no passwd home, or an unwritable root); the Makefile test recipe traps TERM/INT to kill its pytest child and release the lock (exit 143/130); every acquire/release/break/skip is appended to $SUITE_LOCK_DIR/history.jsonl (rotated at 1 MiB to .1)
 
+### Frood systemd user service
+handler: ops/frood_service.py install / render_unit; ops/systemd/frood.service
+decides: how the unit is filled (render_unit replaces @REPO@/@PYTHON@/@PORT@/@PATH@/@LOG@), active unit with changed content restarts and unchanged content prints already-running (no port probe), inactive unit with a busy port enables without starting (names the port), restart on failure 5 times in 300 s then reset-failed clears the failed state, log path from FROOD_SERVICE_LOG or ~/.local/state/frood/frood-http.log
+
 ## How to keep this map accurate
 
 - A handler rename is a same-commit map update: edit the `handler:` line in the
