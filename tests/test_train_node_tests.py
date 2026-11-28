@@ -31,6 +31,8 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
+
 FIXTURE_TRAIN_SH = Path(__file__).resolve().parents[1] / "ops" / "train.sh"
 FIXTURE_LOCK_LIB = (
     FIXTURE_TRAIN_SH.parents[1] / "orchestrator" / "ops" / "workstation" / "suite-lock.sh"
@@ -974,6 +976,10 @@ class TestSuiteLock:
     # SIGHUP while a test is running: exit 129, the test child is gone, and
     # held/ is gone (SIGHUP also runs the EXIT trap, handled explicitly so the
     # child dies before release).
+    @pytest.mark.skipif(
+        signal.getsignal(signal.SIGHUP) == signal.SIG_IGN,
+        reason="SIGHUP ignored on entry (e.g. nohup): bash cannot trap it, so the train correctly runs to completion",
+    )
     def test_sighup_while_test_runs_exits_129(self, tmp_path):
         ticket = "sleep-ticket"
         bin_dir = tmp_path / "bin"
