@@ -152,6 +152,48 @@ test("no key: env unset and temp db without the row means no request", async (t)
   assert.equal(calls, 0);
 });
 
+test("key omitted: OPENCODE_GO_KEY unset and a temp OPENCODE_DB row supplies the bearer", async (t) => {
+  const { seen, url } = await localServer(t, () => [200, g0Body()]);
+  const dbPath = tempDb([{ key: FAKE_KEY, active: true }]);
+  const prevKey = process.env.OPENCODE_GO_KEY;
+  const prevDb = process.env.OPENCODE_DB;
+  delete process.env.OPENCODE_GO_KEY;
+  process.env.OPENCODE_DB = dbPath;
+  try {
+    const r = await snapshot({ url, now: NOW });
+    assert.equal(r.ok, true);
+    assert.equal(r.snap.at, iso(NOW));
+    assert.equal(seen.count, 1);
+    assert.equal(seen.auth, `Bearer ${FAKE_KEY}`);
+    assert.ok(!JSON.stringify(r).includes(FAKE_KEY), "returned object leaks the key");
+  } finally {
+    if (prevKey === undefined) delete process.env.OPENCODE_GO_KEY;
+    else process.env.OPENCODE_GO_KEY = prevKey;
+    if (prevDb === undefined) delete process.env.OPENCODE_DB;
+    else process.env.OPENCODE_DB = prevDb;
+  }
+});
+
+test("redirects are refused: a 302 to another loopback path gives error and never hits it", async (t) => {
+  const hits = { target: 0 };
+  const server = http.createServer((req, res) => {
+    if (req.url === "/target") {
+      hits.target++;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(g0Body()));
+      return;
+    }
+    res.writeHead(302, { location: "/target" });
+    res.end();
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const url = `http://127.0.0.1:${server.address().port}/usage`;
+  const r = await snapshot({ url, now: NOW, key: FAKE_KEY });
+  assert.deepEqual(r, { ok: false, reason: "error" });
+  assert.equal(hits.target, 0, "the redirect target must never be requested");
+});
+
 test("evil and ftp URLs are refused with no request", async () => {
   let calls = 0;
   const counting = async () => {
@@ -206,13 +248,16 @@ test("parseUsage maps the G0 shape and nulls malformed meters", () => {
   assert.ok(parseUsage(missing).weekly);
 });
 
-test("jsonl: append keeps lines within 8 weeks, drops older; corrupt lines skipped by readLatest", () => {
+test("jsonl: append keeps lines within 8 weeks, drops older; corrupt lines skipped by readLatest", async (t) => {
   const dir = tempDir();
   const file = path.join(dir, "go-usage.jsonl");
   const oldSnap = { at: iso(NOW - 9 * 7 * 86400 * 1000), rolling: null, weekly: null, monthly: null };
   const midSnap = { at: iso(NOW - 7 * 86400 * 1000), rolling: { pct: 1, status: "ok", resets_at: iso(NOW) }, weekly: null, monthly: null };
   fs.writeFileSync(file, JSON.stringify(oldSnap) + "\n" + "corrupt{\n" + JSON.stringify(midSnap) + "\n");
-  const fresh = { at: iso(NOW), rolling: { pct: 2, status: "ok", resets_at: iso(NOW + 3600 * 1000) }, weekly: null, monthly: null };
+  const { url } = await localServer(t, () => [200, g0Body({ rolling: 2 })]);
+  const r = await snapshot({ url, now: NOW, key: FAKE_KEY });
+  assert.equal(r.ok, true);
+  const fresh = r.snap;
   appendSnapshot(fresh, { path: file });
   const text = fs.readFileSync(file, "utf8");
   assert.ok(!text.includes("corrupt"), text);

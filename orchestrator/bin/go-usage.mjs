@@ -5,7 +5,8 @@
 //   {usage: {rolling|weekly|monthly: {status, percent, resetsAt}}} to {rolling, weekly, monthly} each
 //   {pct, status, resets_at} or null (whole result null when json.usage is not an object).
 //   snapshot({url, fetchImpl, now, key}) GETs the URL (https, or http only for 127.0.0.1/localhost/[::1])
-//   with the key in the Authorization header only (10 s timeout); key defaults to readGoKey().
+//   with the key in the Authorization header only (10 s timeout, redirects refused); key defaults
+//   to readGoKey().
 //   appendSnapshot(snap, {path}) atomically appends to <orchDir()>/go-usage.jsonl (temp + rename,
 //   pruned past 8 weeks). readLatest({path}) / readHistory({path, since}) skip unparsable lines.
 //   CLI: node go-usage.mjs snapshot [--json] (snapshot() with defaults, append on ok, one line, exit 0
@@ -148,6 +149,7 @@ export async function snapshot({ url = GO_USAGE_URL_DEFAULT, fetchImpl = fetch, 
     res = await fetchImpl(url, {
       headers: { Authorization: `Bearer ${k}` },
       signal: AbortSignal.timeout(TIMEOUT_MS),
+      redirect: "error",
     });
   } catch (e) {
     const name = e && typeof e === "object" ? e.name || e.code : null;
@@ -317,7 +319,7 @@ export async function main(argv) {
   return 2;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)) {
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main(process.argv.slice(2)).then(
     (code) => process.exit(code),
     () => process.exit(0),

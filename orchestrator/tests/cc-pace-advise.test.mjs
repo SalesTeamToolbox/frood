@@ -210,8 +210,11 @@ function sandbox() {
   const dir = path.join(home, ".config", "orchestrator");
   fs.mkdirSync(dir, { recursive: true });
   const env = (extra = {}) => {
-    const e = { ...process.env, ORCH_HOME: home, TZ: "UTC", ORCH_NO_NOTIFY: "1", CC_SIDECAR: path.join(home, "no-sidecar.json"), SERVICE_JSON: path.join(home, "no-service.json"), ...extra };
+    // desk-check takes a throttled Go usage snapshot each tick; a spawned CLI must never
+    // read the real opencode db or the real Go key.
+    const e = { ...process.env, ORCH_HOME: home, TZ: "UTC", ORCH_NO_NOTIFY: "1", CC_SIDECAR: path.join(home, "no-sidecar.json"), SERVICE_JSON: path.join(home, "no-service.json"), OPENCODE_DB: path.join(home, "no-such-opencode.db"), ...extra };
     delete e.ORCH_NO_PACE;
+    delete e.OPENCODE_GO_KEY;
     return e;
   };
   const run = (args = [], extra = {}) => spawnSync(process.execPath, [BIN, ...args], { env: env(extra), encoding: "utf8", timeout: 20000 });
