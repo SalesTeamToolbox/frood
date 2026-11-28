@@ -3031,7 +3031,8 @@ test("inhibitor: a throw in the setup gap releases the inhibitor and the slots (
   const { code } = await new Promise((res) => child.on("close", (c) => res({ code: c })));
   assert.ok(code !== 0, `expected a non-zero exit from the setup throw, got ${code}`);
   // D1 core: release() runs in the finally, so the machine slot is freed even though setup threw.
-  assert.deepEqual(fs.readdirSync(slotDir_(dir)), ["clear-state.json"], "no slot dir left after the setup throw");
+  // clear-state.json appears only when the live /proc sample is clear (this test does not pin ORCH_PROC_ROOT), so ignore it.
+  assert.deepEqual(fs.readdirSync(slotDir_(dir)).filter((n) => !n.startsWith("clear-state.json")), [], "no slot dir left after the setup throw");
   // If the fake inhibitor managed to record before oc-worker exited, its pid must be gone now.
   let logged;
   try { logged = JSON.parse(fs.readFileSync(record, "utf8")); } catch { logged = null; }

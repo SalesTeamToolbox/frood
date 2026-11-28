@@ -101,7 +101,7 @@ test("success: claude argv per the spike, cwd = worktree, receipt model sonnet, 
   assert.match(fs.readFileSync(r.out, "utf8"), /^RESULT: DONE\nfake claude worked in /);
   assert.ok(fs.existsSync(r.out + ".events.jsonl"));
   assert.deepEqual(JSON.parse(fs.readFileSync(r.out + ".receipt.json", "utf8")).session, "cc-ses-fake123");
-  assert.deepEqual(fs.readdirSync(slotsOf(home)), ["clear-state.json"], "slots released");
+  assert.deepEqual(fs.readdirSync(slotsOf(home)).filter((n) => !n.startsWith("clear-state.json")), [], "slots released");
 });
 
 test("receipt has the same field set as an OpenCode worker run", () => {
@@ -218,7 +218,7 @@ test("timeout kills only its own claude pid", async () => {
   assert.ok(dead(pid), "the timed-out claude is gone");
   assert.ok(!dead(bystander.pid), "an unrelated process is untouched");
   bystander.kill("SIGKILL");
-  assert.deepEqual(fs.readdirSync(slotsOf(home)), ["clear-state.json"], "slots released after a timeout");
+  assert.deepEqual(fs.readdirSync(slotsOf(home)).filter((n) => !n.startsWith("clear-state.json")), [], "slots released after a timeout");
 });
 
 test("SIGTERM to an in-process (--no-detach) oc-worker ends the claude process and releases the cc slot (exit 143, receipt killed)", async () => {
@@ -231,7 +231,7 @@ test("SIGTERM to an in-process (--no-detach) oc-worker ends the claude process a
   assert.equal(r.code, 143);
   assert.equal(JSON.parse(fs.readFileSync(a.out + ".receipt.json", "utf8")).exit, "killed");
   assert.ok(await waitFor(() => dead(pid), 7000), "claude is gone");
-  assert.deepEqual(fs.readdirSync(slotsOf(home)), ["clear-state.json"]);
+  assert.deepEqual(fs.readdirSync(slotsOf(home)).filter((n) => !n.startsWith("clear-state.json")), []);
 });
 
 test("hook-free: --settings disableAllHooks in the claude argv and PEER_WAKE_MAX_MIN=0 even when the parent sets 30; OpenCode argv has no --settings", () => {
@@ -299,7 +299,7 @@ test("survival: SIGTERM to the launcher exits it 143; the detached run finishes 
     assert.equal(rc.exit, 0);
     assert.equal(rc.first_line, "RESULT: DONE");
     assert.ok(await waitFor(() => dead(childPid) && dead(claudePid), 10000), "no process of the run remains");
-    assert.deepEqual(fs.readdirSync(slotsOf(home)), ["clear-state.json"], "slots released");
+    assert.deepEqual(fs.readdirSync(slotsOf(home)).filter((n) => !n.startsWith("clear-state.json")), [], "slots released");
   } finally {
     if (childPid && !dead(childPid)) try { process.kill(childPid, "SIGKILL"); } catch {}
   }
