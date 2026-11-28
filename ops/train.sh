@@ -255,8 +255,11 @@ release_our_lock() {
   fi
 }
 
-on_term() {
-  local i
+# Kill a running test child (its whole process group, since timeout does not
+# forward signals), wait up to 2 s, KILL if still alive, then release the lock
+# and exit with the given code.
+kill_child_release_exit() {
+  local code="$1" i
   if [ -n "$child_pid" ] && kill -0 "$child_pid" 2>/dev/null; then
     kill -TERM -- "-$child_pid" 2>/dev/null || true
     for i in 1 2; do
@@ -269,20 +272,18 @@ on_term() {
     wait "$child_pid" 2>/dev/null || true
   fi
   release_our_lock
-  exit 143
+  exit "$code"
 }
 
-on_int() {
-  if [ -n "$child_pid" ] && kill -0 "$child_pid" 2>/dev/null; then
-    kill -TERM -- "-$child_pid" 2>/dev/null || true
-    wait "$child_pid" 2>/dev/null || true
-  fi
-  release_our_lock
-  exit 130
-}
+on_term() { kill_child_release_exit 143; }
+on_int()  { kill_child_release_exit 130; }
+# SIGHUP runs the EXIT trap too; handle it explicitly so the test child dies
+# before we release, and we exit 129 instead of silently continuing unlocked.
+on_hup()  { kill_child_release_exit 129; }
 
 trap 'on_term' TERM
 trap 'on_int' INT
+trap 'on_hup' HUP
 trap 'release_our_lock' EXIT
 
 # ── take the box-wide suite lock right before the test gate ─────────────
@@ -370,8 +371,16 @@ while IFS= read -r f; do
           detail="detail: test failed: $f"
         fi
         write_receipt "test failure" 1 "$detail"
-        cat "$pytest_log" >&2
-        echo "train: pytest failed (exit 1)" >&2
+        case "$f" in
+          *.py)
+            cat "$pytest_log" >&2
+            echo "train: pytest failed (exit 1)" >&2
+            ;;
+          *.test.mjs|*.test.js)
+            cat "$node_test_log" >&2
+            echo "train: node --test failed (exit 1)" >&2
+            ;;
+        esac
         exit 1
       fi
       ;;

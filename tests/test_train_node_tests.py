@@ -24,6 +24,7 @@ python-convention pytest.log produced.
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -101,6 +102,13 @@ def run_train(repo: Path, ticket: str, bin_dir: Path, reports_root: Path, env_ex
     ~/.local/state/frood-workstation/suite-lock.
     """
     env = os.environ.copy()
+    # The calling test process may itself have inherited FROOD_SUITE_LOCK_HELD=1
+    # (e.g. `make test` exports it to pytest, or the gate runs the suite with it
+    # set). Never leak it into train.sh: train.sh would then skip the lock and
+    # every suite_lock assertion breaks. Pop it here; env_extra (test (d)) can
+    # still set it deliberately.
+    env.pop("FROOD_SUITE_LOCK_HELD", None)
+    env.pop("SUITE_LOCK", None)
     env["PATH"] = str(bin_dir) + os.pathsep + env["PATH"]
     env["FROOD_REPORTS_ROOT"] = str(reports_root)
     env["SUITE_LOCK_ROOT"] = str(repo.parent / "slroot")
@@ -222,6 +230,10 @@ class TestBoardTicket:
         assert receipt["exit_code"] == "1"
         assert receipt["tests_source"] == "board-ticket"
         assert receipt["tests"] == "orchestrator/tests/x.test.mjs"
+        # node failure output is catted to stderr (not pytest.log).
+        node_log = (reports_root / ticket / "node-test.log").read_text()
+        assert node_log.strip(), "node-test.log should hold this run's failure output"
+        assert node_log.strip() in res.stderr
 
     def test_board_ticket_missing_path(self, tmp_path):
         ticket = "node-ticket"
@@ -743,6 +755,30 @@ class TestSuiteLock:
         assert receipt["suite_lock_wait_s"] == "0"
         assert not (slroot / "held").exists()
 
+    # Regression: an inherited FROOD_SUITE_LOCK_HELD=1 (from the calling pytest
+    # process or `make test`) must NOT make train.sh skip the lock; run_train
+    # pops it so a normal run still takes the lock and reports `held`.
+    def test_inherited_frood_suite_lock_held_is_popped(self, tmp_path, monkeypatch):
+        ticket = "py-ticket"
+        bin_dir = tmp_path / "bin"
+        make_stub_ruff(bin_dir)
+        reports_root = tmp_path / "reports"
+        slroot = tmp_path / "slroot"
+        monkeypatch.setenv("FROOD_SUITE_LOCK_HELD", "1")
+        repo = make_fixture(
+            tmp_path,
+            ticket,
+            tracked_files={"tests/test_py-ticket.py": PASS_PY},
+            copy_lock_lib=True,
+        )
+        res = run_train(repo, ticket, bin_dir, reports_root)
+        assert res.returncode == 0, res.stderr
+        receipt = parse_receipt(reports_root, ticket)
+        assert receipt["status"] == "pass"
+        assert receipt["suite_lock"] == "held"
+        assert receipt["suite_lock_wait_s"] == "0"
+        assert not (slroot / "held").exists()
+
     # (e) no lib at either path: unlocked (no lib), the stderr WARN line, and a pass.
     def test_no_lock_lib_unlocked_no_lib(self, tmp_path):
         ticket = "py-ticket"
@@ -816,6 +852,9 @@ class TestSuiteLock:
             copy_lock_lib=True,
         )
         env = os.environ.copy()
+        # Never leak an inherited FROOD_SUITE_LOCK_HELD/SUITE_LOCK into train.sh.
+        env.pop("FROOD_SUITE_LOCK_HELD", None)
+        env.pop("SUITE_LOCK", None)
         env["PATH"] = str(bin_dir) + os.pathsep + env["PATH"]
         env["FROOD_REPORTS_ROOT"] = str(reports_root)
         env["SUITE_LOCK_ROOT"] = str(slroot)
@@ -839,11 +878,14 @@ class TestSuiteLock:
             time.sleep(0.05)
         else:
             proc.kill()
-            raise AssertionError("train never reached the test child: " + (proc.stderr or "")[:500])
+            proc.wait(timeout=5)
+            err = proc.stderr.read() if proc.stderr else ""
+            raise AssertionError("train never reached the test child: " + err[:500])
         pid = int(pidfile.read_text())
         proc.terminate()  # SIGTERM
         rc = proc.wait(timeout=30)
-        assert rc == 143, f"expected exit 143, got {rc}: {proc.stderr}"
+        err = proc.stderr.read() if proc.stderr else ""
+        assert rc == 143, f"expected exit 143, got {rc}: {err}"
         # The test child must be gone.
         dead = False
         for _ in range(50):
@@ -919,7 +961,8 @@ class TestSuiteLock:
             assert queued, "train never queued behind the live holder"
             proc.terminate()  # SIGTERM mid-wait
             rc = proc.wait(timeout=30)
-            assert rc == 143, f"expected exit 143 mid-wait, got {rc}: {proc.stderr}"
+            err = proc.stderr.read() if proc.stderr else ""
+            assert rc == 143, f"expected exit 143 mid-wait, got {rc}: {err}"
         finally:
             stop.set()
             beater.join(timeout=5)
@@ -927,3 +970,77 @@ class TestSuiteLock:
         # No queue ticket may be left behind.
         assert not any(slroot.glob("queue/*")), "queue ticket left behind after mid-wait SIGTERM"
         assert not (slroot / "held").exists(), "held/ still present after mid-wait SIGTERM"
+
+    # SIGHUP while a test is running: exit 129, the test child is gone, and
+    # held/ is gone (SIGHUP also runs the EXIT trap, handled explicitly so the
+    # child dies before release).
+    def test_sighup_while_test_runs_exits_129(self, tmp_path):
+        ticket = "sleep-ticket"
+        bin_dir = tmp_path / "bin"
+        make_stub_ruff(bin_dir)
+        reports_root = tmp_path / "reports"
+        slroot = tmp_path / "slroot"
+        pidfile = tmp_path / "pidfile"
+        repo = make_fixture(
+            tmp_path,
+            ticket,
+            tracked_files={"z.sleep.test.mjs": SLEEP_NODE},
+            untracked_files={
+                ".opencode/board/tickets/sleep-ticket.json": (
+                    '{"schema":1,"id":"sleep-ticket","stage":"working",'
+                    '"blast_radius":[{"caller":"c","expect":"unchanged",'
+                    '"test":"z.sleep.test.mjs"}]}'
+                ),
+            },
+            copy_lock_lib=True,
+        )
+        env = os.environ.copy()
+        # Never leak an inherited FROOD_SUITE_LOCK_HELD/SUITE_LOCK into train.sh.
+        env.pop("FROOD_SUITE_LOCK_HELD", None)
+        env.pop("SUITE_LOCK", None)
+        env["PATH"] = str(bin_dir) + os.pathsep + env["PATH"]
+        env["FROOD_REPORTS_ROOT"] = str(reports_root)
+        env["SUITE_LOCK_ROOT"] = str(slroot)
+        env["TRAIN_NODE_TIMEOUT"] = "600"
+        env["TRAIN_FIXTURE_PIDFILE"] = str(pidfile)
+        env["SUITE_LOCK_POLL"] = "1"
+        env["SUITE_LOCK_STALE"] = "5"
+        proc = subprocess.Popen(
+            ["bash", "ops/train.sh", ticket],
+            cwd=repo,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        # Wait until the test child is running and the lock is held.
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            if pidfile.exists() and (slroot / "held").exists():
+                break
+            time.sleep(0.05)
+        else:
+            proc.kill()
+            proc.wait(timeout=5)
+            err = proc.stderr.read() if proc.stderr else ""
+            raise AssertionError("train never reached the test child: " + err[:500])
+        pid = int(pidfile.read_text())
+        proc.send_signal(signal.SIGHUP)
+        rc = proc.wait(timeout=30)
+        err = proc.stderr.read() if proc.stderr else ""
+        assert rc == 129, f"expected exit 129, got {rc}: {err}"
+        # The test child must be gone.
+        dead = False
+        for _ in range(50):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                dead = True
+                break
+            except PermissionError:
+                dead = True
+                break
+            time.sleep(0.1)
+        assert dead, f"node child pid {pid} still alive after train.sh returned"
+        # The lock must be released.
+        assert not (slroot / "held").exists(), "held/ still present after SIGHUP"
