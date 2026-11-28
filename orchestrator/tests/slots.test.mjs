@@ -6,7 +6,7 @@ import path from "path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { readSample, slotConfig, allowedSlots, decisionLog, nvidiaCap, nvidiaCapNow, readNvidiaState, recordNvidia429 } from "../bin/slots.mjs";
+import { readSample, slotConfig, allowedSlots, decisionLog, readClearState, writeClearState, nvidiaCap, nvidiaCapNow, readNvidiaState, recordNvidia429 } from "../bin/slots.mjs";
 import { acquireSlot, slotDir } from "../bin/oc-worker.mjs";
 import { installFixtureGuard } from "./fixtures/fixture-guard.mjs";
 
@@ -91,8 +91,8 @@ test("readSample: missing any file or field returns null", () => {
 test("slotConfig: --slots beats WORKER_SLOTS; empty string = unset", () => {
   assert.deepEqual(slotConfig({ WORKER_SLOTS: "5" }, 3), { mode: "fixed", n: 3 });
   assert.deepEqual(slotConfig({ WORKER_SLOTS: "5" }, ""), { mode: "fixed", n: 5 }); // WORKER_SLOTS non-empty wins
-  assert.deepEqual(slotConfig({ WORKER_SLOTS: "" }, ""), { mode: "dynamic", min: 2, max: 6 }); // both unset
-  assert.deepEqual(slotConfig({}, undefined), { mode: "dynamic", min: 2, max: 6 });
+  assert.deepEqual(slotConfig({ WORKER_SLOTS: "" }, ""), { mode: "dynamic", min: 2, max: 10 }); // both unset
+  assert.deepEqual(slotConfig({}, undefined), { mode: "dynamic", min: 2, max: 10 });
   assert.deepEqual(slotConfig({ WORKER_SLOTS: "4" }, undefined), { mode: "fixed", n: 4 });
   assert.deepEqual(slotConfig({ WORKER_SLOTS: "", WORKER_SLOTS_MIN: "3", WORKER_SLOTS_MAX: "9" }, undefined), {
     mode: "dynamic", min: 3, max: 9,
@@ -260,7 +260,7 @@ function heldFloor(dir, me, T, sinceMs = 10000) {
     fs.writeFileSync(path.join(dir, `slot-${n}`, "owner"), JSON.stringify({ pid: me, since: new Date(T - sinceMs).toISOString() }));
   }
 }
-function dynamicCfg() { return { mode: "dynamic", min: 2, max: 6 }; }
+function dynamicCfg() { return { mode: "dynamic", min: 2, max: 10 }; }
 function clear() { return clearSample(); }
 
 test("acquireSlot: burst guard refuses an above-floor slot when a floor slot was claimed within 60 s", async () => {
@@ -270,9 +270,9 @@ test("acquireSlot: burst guard refuses an above-floor slot when a floor slot was
   fs.mkdirSync(dir, { recursive: true });
   const T = 100000;
   const me = process.pid;
-  heldFloor(dir, me, T); // since = T - 10 s, inside the 60 s burst window
+  heldFloor(dir, me, T); // since = T - 10 s, inside the 20 s burst window
   const cfg = dynamicCfg();
-  // allowed = 6 (clearSince long past), but every slot above the floor is blocked by the burst guard.
+  // allowed = 10 (clearSince long past), but every slot above the floor is blocked by the burst guard.
   await assert.rejects(
     acquireSlot(cfg, { pollMs: 10, sample: clear(), now: T, state: { clearSince: T - 120000 }, deadline: T - 1 }),
     /no free worker slot/,
@@ -282,18 +282,14 @@ test("acquireSlot: burst guard refuses an above-floor slot when a floor slot was
   delete process.env.ORCH_PROC_ROOT;
 });
 
-test("acquireSlot: burst guard admits slot-3 when floor slots are older than 60 s", async () => {
+test("acquireSlot: burst guard admits slot-3 when floor slots are older than 20 s", async () => {
   process.env.ORCH_HOME = tmp();
   process.env.ORCH_PROC_ROOT = tmp();
   const dir = slotDir();
   fs.mkdirSync(dir, { recursive: true });
   const T = 100000;
   const me = process.pid;
-  heldFloor(dir, me, T); // since = T - 10 s... override to 120 s below
-  // re-write with old since (outside the burst window)
-  for (const n of [1, 2]) {
-    fs.writeFileSync(path.join(dir, `slot-${n}`, "owner"), JSON.stringify({ pid: me, since: new Date(T - 120000).toISOString() }));
-  }
+  heldFloor(dir, me, T, 30000); // since = T - 30 s, outside the 20 s burst window
   const cfg = dynamicCfg();
   const release = await acquireSlot(cfg, { pollMs: 10, sample: clear(), now: T, state: { clearSince: T - 120000 }, deadline: T + 5000 });
   assert.ok(fs.existsSync(path.join(dir, "slot-3")), "slot-3 admitted above the floor");
@@ -349,6 +345,57 @@ test("acquireSlot: an admit.lock older than 30 s is stale and removed", async ()
   assert.ok(fs.existsSync(path.join(dir, "slot-3")), "stale lock did not block slot-3");
   assert.ok(!fs.existsSync(lock), "stale admit.lock was removed");
   release();
+  delete process.env.ORCH_HOME;
+  delete process.env.ORCH_PROC_ROOT;
+});
+
+// ---------------------------------------------------------------- clear-state shared file
+
+test("clear-state: round trip, and missing/garbage file -> { clearSince: null }", () => {
+  const dir = tmp();
+  assert.deepEqual(readClearState(dir), { clearSince: null }, "missing file -> null");
+  writeClearState(dir, { clearSince: 12345 });
+  assert.deepEqual(readClearState(dir), { clearSince: 12345 }, "round trip");
+  fs.writeFileSync(path.join(dir, "clear-state.json"), "{ not json");
+  assert.deepEqual(readClearState(dir), { clearSince: null }, "garbage -> null");
+  fs.writeFileSync(path.join(dir, "clear-state.json"), JSON.stringify([1, 2, 3]));
+  assert.deepEqual(readClearState(dir), { clearSince: null }, "non-object -> null");
+  fs.writeFileSync(path.join(dir, "clear-state.json"), JSON.stringify({ clearSince: "not-a-number" }));
+  assert.deepEqual(readClearState(dir), { clearSince: null }, "unfinite clearSince -> null");
+});
+
+test("acquireSlot: picks up file clearSince past CLEAR_FOR_MS and admits above floor immediately (no injected state)", async () => {
+  process.env.ORCH_HOME = tmp();
+  process.env.ORCH_PROC_ROOT = tmp();
+  const dir = slotDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const T = 100000;
+  const me = process.pid;
+  // floor slots held, older than the 20 s burst window so the guard passes
+  heldFloor(dir, me, T, 120000);
+  // shared state already clear long enough ago: allowed should be max right away
+  writeClearState(dir, { clearSince: T - 120000 });
+  const cfg = dynamicCfg();
+  const release = await acquireSlot(cfg, { pollMs: 10, sample: clear(), now: T, deadline: T + 5000 });
+  assert.ok(fs.existsSync(path.join(dir, "slot-3")), "slot-3 admitted above the floor immediately from file state");
+  release();
+  delete process.env.ORCH_HOME;
+  delete process.env.ORCH_PROC_ROOT;
+});
+
+test("acquireSlot: a not-clear sample resets the file clearSince to null (no injected state)", async () => {
+  process.env.ORCH_HOME = tmp();
+  process.env.ORCH_PROC_ROOT = tmp();
+  const dir = slotDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const T = 100000;
+  const me = process.pid;
+  writeClearState(dir, { clearSince: T - 120000 });
+  const cfg = dynamicCfg();
+  const release = await acquireSlot(cfg, { pollMs: 10, sample: busyCpu(), now: T, deadline: T + 5000 });
+  assert.ok(fs.existsSync(path.join(dir, "slot-1")), "floor slot claimed under a busy sample");
+  release();
+  assert.deepEqual(readClearState(dir), { clearSince: null }, "not-clear reset the file's clearSince to null");
   delete process.env.ORCH_HOME;
   delete process.env.ORCH_PROC_ROOT;
 });
