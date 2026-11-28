@@ -547,3 +547,96 @@ test("parseDiff: normal modified file", () => {
   ]);
   assert.equal(entries[0].removedBytes, Buffer.byteLength("line 2", "utf8") + 1);
 });
+
+// ---------------- F1: perf — classify 5000-line file in < 1 s ----------------
+
+test("F1: classify 5000-line file in < 1 s", () => {
+  const cfg = loadConfig("/");
+  const lines = [];
+  for (let i = 0; i < 5000; i++) lines.push(`line ${i} some content here`);
+  // Insert one C call site near the end.
+  lines[2500] = 'response = chat.completions.create(model="x")';
+  const start = Date.now();
+  let cCount = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (classify("core/foo.py", i + 1, lines, cfg) === "C") cCount++;
+  }
+  const elapsed = Date.now() - start;
+  assert.equal(cCount, 1);
+  assert.ok(elapsed < 1000, `took ${elapsed} ms`);
+});
+
+// ---------------- F2: C call-site gating ----------------
+
+test("F2: docstring line with URL pattern is not C", () => {
+  const cfg = loadConfig("/");
+  const lines = ['def gateway():', '    """POST /v1/messages"""', "    return 'ok'"];
+  assert.equal(classify("core/gateway.py", 2, lines, cfg), null);
+});
+
+test("F2: comment line with call pattern is not C", () => {
+  const cfg = loadConfig("/");
+  const lines = ['# chat.completions.create(model="x")', "x = 1"];
+  assert.equal(classify("core/foo.py", 1, lines, cfg), null);
+});
+
+test("F2: decorator line with URL pattern is not C", () => {
+  const cfg = loadConfig("/");
+  const lines = ['@router.post("/v1/messages")', "def endpoint():", "    pass"];
+  assert.equal(classify("core/app.py", 1, lines, cfg), null);
+});
+
+test("F2: bare URL assignment with no request call is not C", () => {
+  const cfg = loadConfig("/");
+  const lines = ['url = nvidia_base + "/chat/completions"', "x = 1"];
+  assert.equal(classify("core/foo.py", 1, lines, cfg), null);
+});
+
+test("F2: URL assignment followed by a request call is C", () => {
+  const cfg = loadConfig("/");
+  const lines = ['url = "/v1/messages"', 'client.post(url, json=payload)', "x = 1"];
+  assert.equal(classify("core/foo.py", 1, lines, cfg), "C");
+});
+
+// ---------------- F3: forwarded body → tradeoff ----------------
+
+test("F3: **kwargs spread → tradeoff (cap forwarded)", () => {
+  const diff = `diff --git a/core/foo.py b/core/foo.py\n--- a/core/foo.py\n+++ b/core/foo.py\n@@ -1,2 +1,3 @@\n import os\n+response = chat.completions.create(model="x", messages=[], **kwargs)\n print("done")\n`;
+  const files = { "core/foo.py": "import os\nresponse = chat.completions.create(model=\"x\", messages=[], **kwargs)\nprint(\"done\")\n" };
+  const res = runScanDiff(diff, files);
+  const hits = res.findings.filter((f) => f.rule === "C-no-cap");
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].tag, "tradeoff");
+  assert.equal(hits[0].try, "cap forwarded from callers — not verified");
+  assert.equal(hits[0].issue, "call site without output cap, cap forwarded from callers");
+});
+
+test("F3: json=<ident> body forwarded → tradeoff", () => {
+  const diff = `diff --git a/core/gateway.py b/core/gateway.py\n--- a/core/gateway.py\n+++ b/core/gateway.py\n@@ -1,2 +1,3 @@\n import os\n+response = chat.completions.create(model="x", json=body)\n print(response)\n`;
+  const files = { "core/gateway.py": "import os\nresponse = chat.completions.create(model=\"x\", json=body)\nprint(response)\n" };
+  const res = runScanDiff(diff, files);
+  const hits = res.findings.filter((f) => f.rule === "C-no-cap");
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].tag, "tradeoff");
+  assert.equal(hits[0].issue, "body forwarded from caller — cap not verified");
+});
+
+// ---------------- F6: removed-line attribution (replaced description moves A) ----------------
+
+test("F6: replaced frontmatter description moves A.removed and A.added", () => {
+  const base = "---\ndescription: old trigger phrase\n---\n# body\n";
+  const next = "---\ndescription: new trigger phrase\n---\n# body\n";
+  const diff = `diff --git a/.claude/commands/x.md b/.claude/commands/x.md\n--- a/.claude/commands/x.md\n+++ b/.claude/commands/x.md\n@@ -1,4 +1,4 @@\n ---${
+    ""}\n-description: old trigger phrase${
+    ""}\n+description: new trigger phrase${
+    ""}\n ---`;
+  const entries = parseDiff(diff);
+  const path = ".claude/commands/x.md";
+  const files = new Map([[path, next]]);
+  const baseTexts = new Map([[path, base]]);
+  const cfg = loadConfig("/");
+  const res = scanDiff(entries, files, cfg, baseTexts);
+  assert.equal(res.surfaces.A.removed > 0, true, `A.removed should be > 0, got ${res.surfaces.A.removed}`);
+  assert.equal(res.surfaces.A.added > 0, true, `A.added should be > 0, got ${res.surfaces.A.added}`);
+  assert.ok(res.summary.line.includes("A "), `summary should mention A: ${res.summary.line}`);
+});

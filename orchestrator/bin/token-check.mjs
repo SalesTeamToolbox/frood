@@ -50,54 +50,206 @@ export const DEFAULTS = {
   budgets: { always_loaded_tokens: 300, on_demand_tokens: 1500 },
 };
 
+// URL call patterns (F2): only treated as call sites when a request call
+// appears on the same line or within the next 10 lines.
+const URL_REQUEST_RE = /\.post\(|\.request\(|\.stream\(|fetch\(|requests\.|httpx\.|aiohttp/;
+
 // ---------------------------------------------------------------------------
 // Rules (exported RULES, five in T1)
 // Each rule: { id, surface, tag, run(ctx) → findings[] }.
-// The actual detection logic lives in scanDiff; run() mirrors it for the
-// exported contract. ctx = { entries, files, cfg }.
+// run receives ctx = { entries, files, cfg, lines, states, baseText, dir, mb,
+//   netTokens, surfaceOf } and returns findings[]. scanDiff calls run for every
+//   rule; no stubs.
 //
 export const RULES = [
   {
     id: "A-budget",
     surface: "A",
     tag: "tradeoff",
-    run: (ctx) => [], // implemented inline in scanDiff
+    run: runAbudget,
   },
   {
     id: "A-desc-long",
     surface: "A",
     tag: "tradeoff",
-    run: (ctx) => [], // implemented inline in scanDiff
+    run: runAdescLong,
   },
   {
     id: "C-no-cap",
     surface: "C",
     tag: "WASTE",
-    run: (ctx) => [], // implemented inline in scanDiff
+    run: runCnoCap,
   },
   {
     id: "C-premium-literal",
     surface: "C",
     tag: "tradeoff",
-    run: (ctx) => [], // implemented inline in scanDiff
+    run: runCpremiumLiteral,
   },
   {
     id: "D-unbounded",
     surface: "D",
     tag: "tradeoff",
-    run: (ctx) => [], // implemented inline in scanDiff
+    run: runDunbounded,
   },
 ];
 
 const CALL_EXT_RE = /\.(py|js|mjs|cjs|ts|tsx)$/;
-const MANDATE_RE = /mandate\.md$/i;
 const PREMIUM_RE = /(opus|fable|gpt-5(?!-mini)|\bo3\b(?!-mini)|gemini-[\w.-]*-pro)/i;
 const CAP_KEYWORDS = ["max_tokens", "max_output_tokens", "maxTokens", "max_completion_tokens"];
 const SPREAD_RE = /\*\*kwargs|\*\*params|\.\.\.opts/;
+// F3: bare-identifier body passthrough in call args (json=, content=, data=, body:).
+const FORWARDED_BODY_RE = /\b(json|content|data)\s*=\s*[A-Za-z_$][A-Za-z0-9_$]*\b|\bbody\s*:\s*[A-Za-z_$][A-Za-z0-9_$]*\b/;
 const DESC_LONG_BYTES = 200;
 const MAX_FINDING_LINES = 30;
 const GIT_TIMEOUT_MS = 10000;
 const GIT_MAX_BUFFER = 64 << 20;
+
+// ---------------------------------------------------------------------------
+// Small helpers
+// ---------------------------------------------------------------------------
+
+function netTokens(added, removed) {
+  return Math.ceil((added - removed) / 4);
+}
+
+function formatSigned(n) {
+  return n >= 0 ? `+${n}` : String(n);
+}
+
+function bytesOf(text) {
+  return Buffer.byteLength(String(text), "utf8") + 1;
+}
+
+// Leading-whitespace trim for comment/decorator checks.
+function stripped(line) {
+  return String(line).replace(/^\s*/, "");
+}
+
+// Is this line a comment (after leading whitespace)?
+function isCommentLine(line) {
+  const s = stripped(line);
+  return s.startsWith("#") || s.startsWith("//") || s.startsWith("*") || s.startsWith("/*") || s.startsWith("--");
+}
+
+// Is this line a decorator (after leading whitespace starts with @)?
+function isDecoratorLine(line) {
+  return stripped(line).startsWith("@");
+}
+
+// Cache of per-line states keyed by the lines array reference, so classify()
+// (called once per line by scanDiff) computes string/block-comment state once
+// per file instead of once per line (F1).
+const classifyStates = new WeakMap();
+function getClassifyStates(lines) {
+  let states = classifyStates.get(lines);
+  if (!states) { states = computeLineStates(lines); classifyStates.set(lines, states); }
+  return states;
+}
+
+// ---------------------------------------------------------------------------
+// Per-line state tracking (F2): walk a file's lines once and record, per line,
+// whether it sits inside a Python triple-quoted string ("""/''') or a JS block
+// comment (/* */). A line that opens and closes on itself counts as inside.
+// ---------------------------------------------------------------------------
+
+export function computeLineStates(lines) {
+  const linesArr = Array.isArray(lines) ? lines : String(lines).split("\n");
+  const states = new Array(linesArr.length);
+  let inTriple = false; // Python """ or '''
+  let inBlock = false;  // JS /* */
+
+  for (let i = 0; i < linesArr.length; i++) {
+    const l = linesArr[i];
+    let triple = inTriple;
+    let block = inBlock;
+
+    // Track """ and ''' toggles. Count unescaped occurrences; a line that both
+    // opens and closes counts as inside.
+    for (const q of ['"""', "'''"]) {
+      let idx = l.indexOf(q);
+      let count = 0;
+      while (idx >= 0) {
+        count++;
+        idx = l.indexOf(q, idx + q.length);
+      }
+      if (count % 2 === 1) triple = !triple;
+    }
+
+    // Track /* */ toggles.
+    {
+      let idx = l.indexOf("/*");
+      let openCount = 0;
+      while (idx >= 0) { openCount++; idx = l.indexOf("/*", idx + 2); }
+      idx = l.indexOf("*/");
+      let closeCount = 0;
+      while (idx >= 0) { closeCount++; idx = l.indexOf("*/", idx + 2); }
+      const net = openCount - closeCount;
+      if (net !== 0) block = net > 0 ? true : block;
+      if (closeCount > 0 && openCount === 0) block = false;
+      // If both open and close on same line, line is inside (counts as inside).
+      if (openCount > 0 && closeCount > 0) block = true;
+      if (openCount > 0 && closeCount === 0) block = true;
+    }
+
+    states[i] = { inTriple: triple, inBlock: block, inside: triple || block };
+    inTriple = triple;
+    inBlock = block;
+  }
+  return states;
+}
+
+// Does any of lines[idx..idx+10] contain a request call shape?
+function hasRequestCallNearby(lines, idx) {
+  const end = Math.min(lines.length, idx + 11);
+  for (let j = idx; j < end; j++) {
+    if (URL_REQUEST_RE.test(lines[j])) return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Surface classification (per line, first match wins) — F1/F2/F5
+// text may be a string or a pre-split array of lines (F1).
+// ---------------------------------------------------------------------------
+
+export function classify(path, lineNo, text, cfg) {
+  const p = String(path).replace(/\\/g, "/");
+  const lines = Array.isArray(text) ? text : String(text).split("\n");
+  const idx = lineNo - 1;
+  const line = lines[idx] || "";
+  // F2: compute inside-string / block-comment state once per lines array.
+  const states = Array.isArray(text) ? getClassifyStates(lines) : computeLineStates(lines);
+
+  // 1. C — LLM call site (call file + call pattern on this line). First match.
+  if (CALL_EXT_RE.test(p)) {
+    for (const pat of cfg.llm_call_patterns) {
+      if (!line.includes(pat)) continue;
+      // F2: not a comment, not a decorator, not inside a string/block-comment.
+      if (isCommentLine(line)) continue;
+      if (isDecoratorLine(line)) continue;
+      if (states[idx] && states[idx].inside) continue;
+      if (pat === "/v1/messages" || pat === "/chat/completions") {
+        // F2 URL gating: need a request call on this line or next 10.
+        if (!hasRequestCallNearby(lines, idx)) continue;
+      }
+      return "C";
+    }
+  }
+
+  // 2. A — always-loaded (every line), or agent_docs frontmatter description.
+  if (matchAny(p, cfg.always_loaded)) return "A";
+  if (matchAny(p, cfg.agent_docs) && isFrontmatterDescription(lines, lineNo)) return "A";
+
+  // 3. B — agent_docs body, or mandate file (F5: via matchAny, no MANDATE_RE).
+  if (matchAny(p, cfg.agent_docs)) return "B";
+  if (matchAny(p, ["**/*mandate*.md"])) return "B";
+
+  // 4. D — agent-facing bin/output scripts.
+  if (matchAny(p, cfg.agent_output)) return "D";
+
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Config loading
@@ -162,11 +314,12 @@ export function loadConfig(dir) {
 // Frontmatter description detection
 // ---------------------------------------------------------------------------
 
-// text: full file content. lineNo: 1-based line number to check.
-// Returns true when the file starts with `---`, the line at lineNo lies before
-// the closing `---`, and that line starts with `description:`.
+// text: full file content or a pre-split array of lines (F1). lineNo: 1-based
+// line number to check. Returns true when the file starts with `---`, the line
+// at lineNo lies before the closing `---`, and that line starts with
+// `description:`.
 export function isFrontmatterDescription(text, lineNo) {
-  const lines = String(text).split("\n");
+  const lines = Array.isArray(text) ? text : String(text).split("\n");
   if (!lines[0] || !lines[0].startsWith("---")) return false;
   // Find the closing `---` (a line that is exactly `---`, after the opening one).
   let closeIdx = -1;
@@ -186,10 +339,16 @@ export function isFrontmatterDescription(text, lineNo) {
 // parseDiff — parse `git diff --unified=0` output into entries
 // ---------------------------------------------------------------------------
 
-// Returns [{ path, binary, deleted, added: [{line, text}], removed: [{line, text}], removedBytes }].
-// `removed` is extra (not in the published shape) so scanDiff can attribute
-// removed bytes to surfaces. Line numbers come from the +c,d side of each @@
-// hunk header (post-change numbering).
+// Returns [{ path, binary, deleted, added: [{line, text}], removed: [{line, text, oldLine}], removedBytes }].
+//
+// `removed` entries carry `oldLine` (1-based line number in the pre-change file)
+// so removed lines can be classified against the base file text (F6). Line
+// numbers on added entries come from the +c,d side of each @@ hunk header
+// (post-change numbering).
+//
+// `diff --git <from> <to>` prefixes vary (a/b with default, c/w with
+// mnemonicprefix); the "to" (second) path is taken and any single-letter prefix
+// stripped.
 export function parseDiff(diffText) {
   const entries = [];
   const lines = String(diffText).split("\n");
@@ -201,9 +360,7 @@ export function parseDiff(diffText) {
 
     if (line.startsWith("diff --git ")) {
       if (current) entries.push(current);
-      current = { path: "", binary: false, deleted: false, added: [], removed: [], removedBytes: 0, postLine: 1 };
-      // `diff --git <from> <to>`; prefixes vary (a/b, c/w with mnemonicprefix).
-      // Take the "to" (second) path and strip any single-letter prefix.
+      current = { path: "", binary: false, deleted: false, added: [], removed: [], removedBytes: 0, postLine: 1, oldLine: 1 };
       const dmg = line.match(/^diff --git \S+ (\S+)/);
       if (dmg) {
         let p = dmg[1];
@@ -233,9 +390,10 @@ export function parseDiff(diffText) {
       continue;
     }
 
-    const hunkM = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    const hunkM = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
     if (hunkM) {
-      current.postLine = parseInt(hunkM[1], 10);
+      current.oldLine = parseInt(hunkM[1], 10);
+      current.postLine = parseInt(hunkM[2], 10);
       i++;
       continue;
     }
@@ -248,14 +406,16 @@ export function parseDiff(diffText) {
     }
 
     if (line.startsWith("-") && !line.startsWith("---")) {
-      current.removed.push({ line: current.postLine, text: line.slice(1) });
+      current.removed.push({ line: current.oldLine, text: line.slice(1), oldLine: current.oldLine });
       current.removedBytes += Buffer.byteLength(line.slice(1), "utf8") + 1;
+      current.oldLine++;
       i++;
       continue;
     }
 
-    // Context line (or any other line) advances the post-change counter.
+    // Context line advances both old and post-change counters.
     if (line.startsWith(" ")) {
+      current.oldLine++;
       current.postLine++;
     }
     i++;
@@ -265,14 +425,63 @@ export function parseDiff(diffText) {
   return entries;
 }
 
+// Per-path caches (F1): live inside scanDiff, fresh per call.
+
 // ---------------------------------------------------------------------------
-// scanDiff — pure: classify lines, accumulate surfaces, run rules
+// Full per-line surface with F2 inside-string/refinement and F6 base-text support.
+// `classify` (exported) is the pure first-match; scanDiff uses this wrapper so
+// removed lines can be classified against base text and inside-string state is
+// honored. Each (path,lineNo) is classified once per scan.
 // ---------------------------------------------------------------------------
 
-export function scanDiff(entries, files, cfg) {
+function surfaceFor(p, lineNo, lines, states, cfg) {
+  // C first — classify's C logic, honoring inside-string state (F2).
+  if (CALL_EXT_RE.test(p)) {
+    const idx = lineNo - 1;
+    const line = lines[idx] || "";
+    for (const pat of cfg.llm_call_patterns) {
+      if (!line.includes(pat)) continue;
+      if (isCommentLine(line)) continue;
+      if (isDecoratorLine(line)) continue;
+      if (states && states[idx] && states[idx].inside) continue; // inside """ / /* */
+      if ((pat === "/v1/messages" || pat === "/chat/completions") && !hasRequestCallNearby(lines, idx)) continue;
+      return "C";
+    }
+  }
+  // A
+  if (matchAny(p, cfg.always_loaded)) return "A";
+  if (matchAny(p, cfg.agent_docs) && isFrontmatterDescription(lines, lineNo)) return "A";
+  // B
+  if (matchAny(p, cfg.agent_docs)) return "B";
+  if (matchAny(p, ["**/*mandate*.md"])) return "B";
+  // D
+  if (matchAny(p, cfg.agent_output)) return "D";
+  return null;
+}
+
+function accumulate(surf, surface, bytes, kind, p) {
+  if (surface === "A") surf.A[kind] += bytes;
+  else if (surface === "B") surf.B[kind] += bytes;
+  else if (surface === "C") {
+    surf.C[kind] += bytes;
+    if (kind === "added") surf.C.sites++;
+  } else if (surface === "D") {
+    surf.D[kind] += bytes;
+    if (kind === "added") surf.D.files.add(p);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// scanDiff — pure: classify lines, accumulate surfaces, run rules (F4)
+// ---------------------------------------------------------------------------
+//
+// entries: parseDiff output. files: Map<path, post-change text>. cfg: config.
+// baseTexts (optional): Map<path, base text> for removed-line classification (F6).
+// Returns { surfaces, findings, summary }.
+//
+export function scanDiff(entries, files, cfg, baseTexts) {
   const findings = [];
   let skippedBinary = 0;
-  let lineCount = 0;
 
   const surf = {
     A: { added: 0, removed: 0 },
@@ -280,227 +489,64 @@ export function scanDiff(entries, files, cfg) {
     C: { added: 0, removed: 0, sites: 0 },
     D: { added: 0, removed: 0, files: new Set() },
   };
+  const baseTextsMap = baseTexts || new Map();
+  const cSurfaceFiles = new Set();
 
-  // File text by path (for rules needing full-file context).
-  const fileText = new Map();
-  for (const [p, t] of files) fileText.set(p, t);
+  // Per-path caches (F1): fresh per scanDiff call so repeated invocations in
+  // tests never see stale split/state results.
+  const linesCache = new Map();
+  const statesCache = new Map();
+  const getLines = (p, text) => {
+    let lines = linesCache.get(p);
+    if (!lines) { lines = String(text).split("\n"); linesCache.set(p, lines); }
+    return lines;
+  };
+  const getStates = (p, lines) => {
+    let states = statesCache.get(p);
+    if (!states) { states = computeLineStates(lines); statesCache.set(p, states); }
+    return states;
+  };
 
-  // First pass: classify every added/removed line, accumulate bytes.
+  // Classify each added/removed line ONCE; store results on entry.classified.
   for (const entry of entries) {
     if (entry.binary) { skippedBinary++; continue; }
 
     const p = entry.path;
-    const ft = entry.deleted ? null : fileText.get(p);
+    const postText = files.get(p);
+    const postLines = postText ? getLines(p, postText) : null;
+    const postStates = postLines ? getStates(p, postLines) : null;
+    const baseText = baseTextsMap.get(p);
+    const baseLines = baseText ? String(baseText).split("\n") : null;
+    const baseStates = baseLines ? computeLineStates(baseLines) : null;
 
-    // Reconstruct file text from removed lines for deleted files so
-    // isFrontmatterDescription can still work (best effort).
-    const classifyText = ft !== null ? ft : (entry.deleted && entry.removed.length
-      ? entry.removed.map((r) => r.text).join("\n")
-      : null);
+    entry.classified = { added: [], removed: [] };
 
     for (const add of entry.added) {
-      const surface = classify(p, add.line, classifyText !== null ? classifyText : add.text, cfg);
-      const bytes = Buffer.byteLength(add.text, "utf8") + 1;
-      lineCount++;
-      if (surface === "A") surf.A.added += bytes;
-      else if (surface === "B") surf.B.added += bytes;
-      else if (surface === "C") { surf.C.added += bytes; surf.C.sites++; }
-      else if (surface === "D") { surf.D.added += bytes; surf.D.files.add(p); }
+      const surface = postLines ? surfaceFor(p, add.line, postLines, postStates, cfg)
+        : classify(p, add.line, add.text, cfg);
+      const bytes = bytesOf(add.text);
+      entry.classified.added.push({ line: add.line, text: add.text, surface, bytes });
+      accumulate(surf, surface, bytes, "added", p);
+      if (surface === "C") cSurfaceFiles.add(p);
     }
 
     for (const rem of entry.removed || []) {
-      const surface = classify(p, rem.line, classifyText !== null ? classifyText : rem.text, cfg);
-      const bytes = Buffer.byteLength(rem.text, "utf8") + 1;
-      if (surface === "A") surf.A.removed += bytes;
-      else if (surface === "B") surf.B.removed += bytes;
-      else if (surface === "C") surf.C.removed += bytes;
-      else if (surface === "D") surf.D.removed += bytes;
+      // F6: classify removed lines against base text (frontmatter-aware), using
+      // the old-line number. Fall back to the removed line's own text.
+      const remLines = baseLines || [rem.text];
+      const remStates = baseStates || null;
+      const ln = rem.oldLine != null ? rem.oldLine : rem.line;
+      const surface = surfaceFor(p, ln, remLines, remStates, cfg);
+      const bytes = bytesOf(rem.text);
+      entry.classified.removed.push({ line: rem.line, text: rem.text, surface, bytes, oldLine: rem.oldLine });
+      accumulate(surf, surface, bytes, "removed", p);
     }
   }
 
-  // Mark C-surface files (files with ≥1 C call-site line added).
-  const cSurfaceFiles = new Set();
-  for (const entry of entries) {
-    if (entry.binary || entry.deleted) continue;
-    const p = entry.path;
-    const ft = fileText.get(p);
-    if (!ft) continue;
-    for (const add of entry.added) {
-      if (classify(p, add.line, ft, cfg) === "C") { cSurfaceFiles.add(p); break; }
-    }
-  }
-
-  // ----- Rules -----
-
-  const netTokens = (added, removed) => Math.ceil((added - removed) / 4);
-
-  // A-budget: surface A net tokens > always_loaded_tokens; one finding at first added A line.
-  const aTokens = netTokens(surf.A.added, surf.A.removed);
-  if (aTokens > cfg.budgets.always_loaded_tokens) {
-    for (const entry of entries) {
-      if (entry.binary || entry.deleted) continue;
-      const p = entry.path;
-      const ft = fileText.get(p);
-      if (!ft) continue;
-      for (const add of entry.added) {
-        if (classify(p, add.line, ft, cfg) === "A") {
-          findings.push({
-            tag: "tradeoff",
-            rule: "A-budget",
-            surface: "A",
-            path: p,
-            line: add.line,
-            issue: `always-loaded surface over budget (${aTokens} tok > ${cfg.budgets.always_loaded_tokens})`,
-            try: "move rationale/history to an on-demand reference doc; keep the rule line",
-            verify: "the moved text is still reachable where agents need it",
-            tokens: aTokens,
-          });
-          break;
-        }
-      }
-      if (findings.some((f) => f.rule === "A-budget")) break;
-    }
-  }
-
-  // A-desc-long: added frontmatter description line > 200 bytes.
-  for (const entry of entries) {
-    if (entry.binary || entry.deleted) continue;
-    const p = entry.path;
-    const ft = fileText.get(p);
-    if (!ft) continue;
-    for (const add of entry.added) {
-      if (classify(p, add.line, ft, cfg) !== "A") continue;
-      if (!isFrontmatterDescription(ft, add.line)) continue;
-      const bytes = Buffer.byteLength(add.text, "utf8") + 1;
-      if (bytes > DESC_LONG_BYTES) {
-        findings.push({
-          tag: "tradeoff",
-          rule: "A-desc-long",
-          surface: "A",
-          path: p,
-          line: add.line,
-          issue: `frontmatter description over ${DESC_LONG_BYTES} bytes (${bytes})`,
-          try: "shorten to the trigger phrase; move detail to the body",
-          verify: "discovery still triggers on the same requests",
-          tokens: netTokens(bytes, 0),
-        });
-      }
-    }
-  }
-
-  // C-no-cap: C call-site line, file has no cap keyword, enclosing call args have no spread.
-  for (const entry of entries) {
-    if (entry.binary || entry.deleted) continue;
-    const p = entry.path;
-    const ft = fileText.get(p);
-    if (!ft) continue;
-
-    const hasCap = CAP_KEYWORDS.some((k) => ft.includes(k));
-    if (hasCap) continue; // file has a cap somewhere → no C-no-cap finding
-
-    for (const add of entry.added) {
-      if (classify(p, add.line, ft, cfg) !== "C") continue;
-
-      // Enclosing call arguments: from call line to where ( ) { } balance, max 60 lines.
-      const flines = ft.split("\n");
-      let parenDepth = 0, braceDepth = 0, started = false, spread = false;
-      const start = add.line - 1;
-      for (let j = start; j < Math.min(flines.length, start + 60); j++) {
-        const l = flines[j];
-        started = true;
-        for (const ch of l) {
-          if (ch === "(") parenDepth++;
-          else if (ch === ")") parenDepth--;
-          else if (ch === "{") braceDepth++;
-          else if (ch === "}") braceDepth--;
-        }
-        if (SPREAD_RE.test(l)) spread = true;
-        if (started && parenDepth === 0 && braceDepth === 0) break;
-      }
-
-      const lineBytes = Buffer.byteLength(add.text, "utf8") + 1;
-      if (spread) {
-        findings.push({
-          tag: "tradeoff",
-          rule: "C-no-cap",
-          surface: "C",
-          path: p,
-          line: add.line,
-          issue: "call site without output cap, cap forwarded from callers",
-          try: "cap forwarded from callers — not verified",
-          verify: "the cap fits the longest legitimate answer",
-          tokens: netTokens(lineBytes, 0),
-        });
-      } else {
-        findings.push({
-          tag: "WASTE",
-          rule: "C-no-cap",
-          surface: "C",
-          path: p,
-          line: add.line,
-          issue: "call site without output cap",
-          try: "set an explicit output cap",
-          verify: "the cap fits the longest legitimate answer",
-          tokens: netTokens(lineBytes, 0),
-        });
-      }
-    }
-  }
-
-  // C-premium-literal: added line in C-surface file with premium model literal.
-  for (const entry of entries) {
-    if (entry.binary || entry.deleted) continue;
-    const p = entry.path;
-    if (!cSurfaceFiles.has(p)) continue;
-    const ft = fileText.get(p);
-    if (!ft) continue;
-    for (const add of entry.added) {
-      if (!PREMIUM_RE.test(add.text)) continue;
-      findings.push({
-        tag: "tradeoff",
-        rule: "C-premium-literal",
-        surface: "C",
-        path: p,
-        line: add.line,
-        issue: "premium model literal in C-surface file",
-        try: "route through the repo's tier/router instead of a hard-coded premium model",
-        verify: "the task still gets a model strong enough for it",
-        tokens: netTokens(Buffer.byteLength(add.text, "utf8") + 1, 0),
-      });
-    }
-  }
-
-  // D-unbounded: added line in D file, console.log/print + JSON.stringify,
-  // no .slice/[: on the line, file has none of --json/--limit/--line/--quiet.
-  for (const entry of entries) {
-    if (entry.binary || entry.deleted) continue;
-    const p = entry.path;
-    if (!matchAny(p, cfg.agent_output)) continue;
-    const ft = fileText.get(p);
-    if (!ft) continue;
-    const hasOutputFlag = ["--json", "--limit", "--line", "--quiet"].some((f) => ft.includes(f));
-    if (hasOutputFlag) continue;
-
-    for (const add of entry.added) {
-      if (classify(p, add.line, ft, cfg) !== "D") continue;
-      const t = add.text;
-      const hasPrint = t.includes("console.log(") || t.includes("print(");
-      const hasJSON = t.includes("JSON.stringify(");
-      const hasSlice = t.includes(".slice(") || t.includes("[:");
-      if (hasPrint && hasJSON && !hasSlice) {
-        findings.push({
-          tag: "tradeoff",
-          rule: "D-unbounded",
-          surface: "D",
-          path: p,
-          line: add.line,
-          issue: "unbounded JSON output via console.log/print",
-          try: "add a summary default and put the full dump behind --json",
-          verify: "the full data is still available behind the flag",
-          tokens: netTokens(Buffer.byteLength(t, "utf8") + 1, 0),
-        });
-      }
-    }
+  // ----- Rules (F4): each rule's logic lives in RULES[i].run(ctx) -----
+  const ctx = { entries, files, cfg, surf, cSurfaceFiles, netTokens, bytesOf, getLines, getStates, baseTextsMap };
+  for (const rule of RULES) {
+    findings.push(...rule.run(ctx));
   }
 
   // ----- Sort findings: WASTE first, then tokens desc, then path/line -----
@@ -532,12 +578,174 @@ export function scanDiff(entries, files, cfg) {
   };
 }
 
-function formatSigned(n) {
-  return n >= 0 ? `+${n}` : String(n);
+// ---------------------------------------------------------------------------
+// Rule implementations (F4)
+// ---------------------------------------------------------------------------
+
+function runAbudget(ctx) {
+  const { entries, cfg, surf, netTokens } = ctx;
+  const aTokens = netTokens(surf.A.added, surf.A.removed);
+  if (aTokens <= cfg.budgets.always_loaded_tokens) return [];
+  for (const entry of entries) {
+    if (entry.binary || entry.deleted || !entry.classified) continue;
+    for (const add of entry.classified.added) {
+      if (add.surface === "A") {
+        return [{
+          tag: "tradeoff", rule: "A-budget", surface: "A", path: entry.path, line: add.line,
+          issue: `always-loaded surface over budget (${aTokens} tok > ${cfg.budgets.always_loaded_tokens})`,
+          try: "move rationale/history to an on-demand reference doc; keep the rule line",
+          verify: "the moved text is still reachable where agents need it",
+          tokens: aTokens,
+        }];
+      }
+    }
+  }
+  return [];
 }
 
-function netTokens(added, removed) {
-  return Math.ceil((added - removed) / 4);
+function runAdescLong(ctx) {
+  const { entries, files, cfg, getLines, netTokens } = ctx;
+  const findings = [];
+  for (const entry of entries) {
+    if (entry.binary || entry.deleted || !entry.classified) continue;
+    const p = entry.path;
+    const postText = files.get(p);
+    if (!postText) continue;
+    const postLines = getLines(p, postText);
+    for (const add of entry.classified.added) {
+      if (add.surface !== "A") continue;
+      if (!isFrontmatterDescription(postLines, add.line)) continue;
+      const bytes = bytesOf(add.text);
+      if (bytes > DESC_LONG_BYTES) {
+        findings.push({
+          tag: "tradeoff", rule: "A-desc-long", surface: "A", path: p, line: add.line,
+          issue: `frontmatter description over ${DESC_LONG_BYTES} bytes (${bytes})`,
+          try: "shorten to the trigger phrase; move detail to the body",
+          verify: "discovery still triggers on the same requests",
+          tokens: netTokens(bytes, 0),
+        });
+      }
+    }
+  }
+  return findings;
+}
+
+function runCnoCap(ctx) {
+  const { entries, files, cfg, getLines, netTokens } = ctx;
+  const findings = [];
+  for (const entry of entries) {
+    if (entry.binary || entry.deleted || !entry.classified) continue;
+    const p = entry.path;
+    const postText = files.get(p);
+    if (!postText) continue;
+
+    const hasCap = CAP_KEYWORDS.some((k) => postText.includes(k));
+    if (hasCap) continue;
+
+    const postLines = getLines(p, postText);
+    for (const add of entry.classified.added) {
+      if (add.surface !== "C") continue;
+
+      // Enclosing call arguments: from call line to where ( ) { } balance, max 60 lines.
+      let parenDepth = 0, braceDepth = 0, started = false, spread = false, forwardedBody = false;
+      const start = add.line - 1;
+      for (let j = start; j < Math.min(postLines.length, start + 60); j++) {
+        const l = postLines[j];
+        started = true;
+        for (const ch of l) {
+          if (ch === "(") parenDepth++;
+          else if (ch === ")") parenDepth--;
+          else if (ch === "{") braceDepth++;
+          else if (ch === "}") braceDepth--;
+        }
+        if (SPREAD_RE.test(l)) spread = true;
+        if (FORWARDED_BODY_RE.test(l)) forwardedBody = true;
+        if (started && parenDepth === 0 && braceDepth === 0) break;
+      }
+
+      const tokens = netTokens(bytesOf(add.text), 0);
+      if (forwardedBody) {
+        findings.push({
+          tag: "tradeoff", rule: "C-no-cap", surface: "C", path: p, line: add.line,
+          issue: "body forwarded from caller — cap not verified",
+          try: "cap forwarded from callers — not verified",
+          verify: "the cap fits the longest legitimate answer",
+          tokens,
+        });
+      } else if (spread) {
+        findings.push({
+          tag: "tradeoff", rule: "C-no-cap", surface: "C", path: p, line: add.line,
+          issue: "call site without output cap, cap forwarded from callers",
+          try: "cap forwarded from callers — not verified",
+          verify: "the cap fits the longest legitimate answer",
+          tokens,
+        });
+      } else {
+        findings.push({
+          tag: "WASTE", rule: "C-no-cap", surface: "C", path: p, line: add.line,
+          issue: "call site without output cap",
+          try: "set an explicit output cap",
+          verify: "the cap fits the longest legitimate answer",
+          tokens,
+        });
+      }
+    }
+  }
+  return findings;
+}
+
+function runCpremiumLiteral(ctx) {
+  const { entries, files, cSurfaceFiles, netTokens } = ctx;
+  const findings = [];
+  for (const entry of entries) {
+    if (entry.binary || entry.deleted || !entry.classified) continue;
+    const p = entry.path;
+    if (!cSurfaceFiles.has(p)) continue;
+    const postText = files.get(p);
+    if (!postText) continue;
+    for (const add of entry.classified.added) {
+      if (!PREMIUM_RE.test(add.text)) continue;
+      findings.push({
+        tag: "tradeoff", rule: "C-premium-literal", surface: "C", path: p, line: add.line,
+        issue: "premium model literal in C-surface file",
+        try: "route through the repo's tier/router instead of a hard-coded premium model",
+        verify: "the task still gets a model strong enough for it",
+        tokens: netTokens(bytesOf(add.text), 0),
+      });
+    }
+  }
+  return findings;
+}
+
+function runDunbounded(ctx) {
+  const { entries, files, cfg, getLines, netTokens } = ctx;
+  const findings = [];
+  for (const entry of entries) {
+    if (entry.binary || entry.deleted || !entry.classified) continue;
+    const p = entry.path;
+    if (!matchAny(p, cfg.agent_output)) continue;
+    const postText = files.get(p);
+    if (!postText) continue;
+    const hasOutputFlag = ["--json", "--limit", "--line", "--quiet"].some((f) => postText.includes(f));
+    if (hasOutputFlag) continue;
+    for (const add of entry.classified.added) {
+      if (add.surface !== "D") continue;
+      const t = add.text;
+      const hasPrint = t.includes("console.log(") || t.includes("print(");
+      const hasJSON = t.includes("JSON.stringify(");
+      const hasSlice = t.includes(".slice(") || t.includes("[:");
+      if (hasPrint && hasJSON && !hasSlice) {
+        findings.push({
+          tag: "tradeoff", rule: "D-unbounded", surface: "D", path: p, line: add.line,
+          issue: "unbounded JSON output via console.log/print",
+          try: "add a summary default and put the full dump behind --json",
+          verify: "the full data is still available behind the flag",
+          tokens: netTokens(bytesOf(t), 0),
+        });
+      }
+    }
+  }
+  return findings;
 }
 
 // ---------------------------------------------------------------------------
@@ -645,8 +853,18 @@ export function scan({ dir, base, all }) {
     }
   }
 
+  // F6: gather base-file text for removed-line (frontmatter) classification.
+  const baseTexts = new Map();
+  if (!all) {
+    for (const entry of entries) {
+      if (entry.binary || entry.deleted || !entry.removed.length) continue;
+      const shown = git(["show", `${mb}:${entry.path}`]);
+      if (shown.status === 0) baseTexts.set(entry.path, String(shown.stdout));
+    }
+  }
+
   const cfg = loadConfig(dir);
-  const result = scanDiff(entries, files, cfg);
+  const result = scanDiff(entries, files, cfg, baseTexts);
   return { base: resolvedBase, mb, head: headSha, all: Boolean(all), entries, files, cfg, ...result };
 }
 
@@ -711,33 +929,4 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   if (json) printJson(result);
   else printText(result);
   process.exit(0);
-}
-
-// path: file path. lineNo: 1-based line number. text: full file content.
-// cfg: resolved config (see loadConfig / DEFAULTS).
-// Returns "A" | "B" | "C" | "D" | null.
-export function classify(path, lineNo, text, cfg) {
-  const p = String(path).replace(/\\/g, "/");
-  const lines = String(text).split("\n");
-  const line = lines[lineNo - 1] || "";
-
-  // 1. C — LLM call site (call file + call pattern on this line). First match.
-  if (CALL_EXT_RE.test(p)) {
-    for (const pat of cfg.llm_call_patterns) {
-      if (line.includes(pat)) return "C";
-    }
-  }
-
-  // 2. A — always-loaded (every line), or agent_docs frontmatter description.
-  if (matchAny(p, cfg.always_loaded)) return "A";
-  if (matchAny(p, cfg.agent_docs) && isFrontmatterDescription(text, lineNo)) return "A";
-
-  // 3. B — agent_docs body, or mandate file.
-  if (matchAny(p, cfg.agent_docs)) return "B";
-  if (MANDATE_RE.test(p)) return "B";
-
-  // 4. D — agent-facing bin/output scripts.
-  if (matchAny(p, cfg.agent_output)) return "D";
-
-  return null;
 }
