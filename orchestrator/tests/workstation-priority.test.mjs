@@ -5,7 +5,7 @@ import os from "os";
 import path from "path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
-import { runPass, writePassLog, realSetPriority, spikeSample, readProc, ticksOf } from "../ops/workstation/agent-priority.mjs";
+import { runPass, writePassLog, realSetPriority, spikeSample, readProc, ticksOf, redactEntry } from "../ops/workstation/agent-priority.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WORKSTATION = path.join(HERE, "..", "ops", "workstation");
@@ -769,4 +769,75 @@ test("spikeSample: null rssKiB yields null rssMiB", () => {
   });
   assert.ok(s);
   assert.equal(s.top[0].rssMiB, null);
+});
+
+// ----------------------------------------------------------- redactEntry (privacy)
+
+const FAKE_HOME = "/tmp/fakehome";
+
+function redact({ argv, cwd, agentRoot = null }) {
+  return redactEntry({ argv, cwd, agentRoot }, FAKE_HOME);
+}
+
+test("redactEntry: vault path in argv on a non-agent proc -> cmd/repo null, vault true", () => {
+  const r = redact({ argv: ["bash", "-c", "cd /tmp/fakehome/Vault/secret && ls"], cwd: "/tmp/fakehome/Vault/secret" });
+  assert.equal(r.cmd, null);
+  assert.equal(r.repo, null);
+  assert.equal(r.vault, true);
+});
+
+test("redactEntry: vault cwd with relative argv -> null", () => {
+  const r = redact({ argv: ["ls"], cwd: "/tmp/fakehome/.vault/work" });
+  assert.equal(r.cmd, null);
+  assert.equal(r.repo, null);
+  assert.equal(r.vault, true);
+});
+
+test("redactEntry: vault path in argv INSIDE an agent tree -> null", () => {
+  const r = redact({ argv: ["node", "/tmp/fakehome/Vault/tool/run.js"], cwd: "/tmp/fakehome/projects/myapp", agentRoot: { pid: 1, comm: "claude" } });
+  assert.equal(r.cmd, null);
+  assert.equal(r.repo, null);
+  assert.equal(r.vault, true);
+});
+
+test("redactEntry: non-agent proc with cwd outside projects -> cmd/repo null, comm kept", () => {
+  const r = redact({ argv: ["sleep", "100"], cwd: "/tmp" });
+  assert.equal(r.cmd, null);
+  assert.equal(r.repo, null);
+  assert.equal(r.vault, false);
+});
+
+test("redactEntry: agent proc under projects -> cmd and repo kept", () => {
+  const r = redact({ argv: ["node", "vitest"], cwd: "/tmp/fakehome/projects/myapp", agentRoot: { pid: 1, comm: "claude" } });
+  assert.equal(r.cmd, "node vitest");
+  assert.equal(r.repo, "/tmp/fakehome/projects/myapp");
+  assert.equal(r.vault, false);
+});
+
+test("redactEntry: agent root but cwd outside projects and no vault -> cmd kept, repo null", () => {
+  const r = redact({ argv: ["node", "worker"], cwd: "/tmp", agentRoot: { pid: 1, comm: "claude" } });
+  assert.equal(r.cmd, "node worker");
+  assert.equal(r.repo, null);
+  assert.equal(r.vault, false);
+});
+
+test("redactEntry: non-agent proc under projects -> cmd kept, repo kept", () => {
+  const r = redact({ argv: ["make", "test"], cwd: "/tmp/fakehome/projects/foo" });
+  assert.equal(r.cmd, "make test");
+  assert.equal(r.repo, "/tmp/fakehome/projects/foo");
+  assert.equal(r.vault, false);
+});
+
+test("redactEntry: realpath of cwd under vault redacts even if cwd string does not", () => {
+  // /tmp/fakehome/projects/foo is a symlink to /tmp/fakehome/Vault: cwd string has no vault,
+  // but realpath does. Agent root null, but under projects -> keep=true, redact=true.
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "redact-home-"));
+  fs.mkdirSync(`${tmpHome}/projects`, { recursive: true });
+  fs.mkdirSync(`${tmpHome}/Vault`, { recursive: true });
+  fs.symlinkSync(`${tmpHome}/Vault`, `${tmpHome}/projects/foo`);
+  const r = redactEntry({ argv: ["ls"], cwd: `${tmpHome}/projects/foo`, agentRoot: null }, tmpHome);
+  assert.equal(r.cmd, null);
+  assert.equal(r.repo, null);
+  assert.equal(r.vault, true);
+  fs.rmSync(tmpHome, { recursive: true, force: true });
 });

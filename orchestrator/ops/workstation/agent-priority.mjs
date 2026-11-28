@@ -16,9 +16,9 @@
 //
 // SPIKE SAMPLING: each loop pass keeps the previous pass's pid->ticks map and,
 // when load1 >= 0.75*nproc or PSI some avg10 >= 20, logs the top-8 CPU consumers
-// (with agent root and repo) to <stateDir>/spikes.jsonl (rotated like the
-// priority-guard log). The sampler is pure (spikeSample) and never breaks or
-// slows a renice pass.
+// (agent trees and ~/projects only; vault paths redacted) to
+// <stateDir>/spikes.jsonl (rotated like the priority-guard log). The sampler is
+// pure (spikeSample) and never breaks or slows a renice pass.
 //
 //   node agent-priority.mjs        loop forever (SIGTERM/SIGINT exit 0)
 //   node agent-priority.mjs --once one pass, print what it lowered
@@ -311,7 +311,8 @@ export function spikeSample({
     top.push({
       pid,
       comm: p.comm || "",
-      cmd: p.argv.join(" ").slice(0, 160),
+      argv: p.argv,        // carried for redaction in doPass; removed before output
+      cmd: capArgv(p.argv),
       rssMiB: p.rssKiB === null ? null : Math.round(p.rssKiB / 1024),
       cpu: delta / clkTck / sec * 100,
       agentRoot: null,
@@ -351,23 +352,54 @@ function attachAgentRoots(procs, top) {
   }
 }
 
-// Reduce readlink /proc/<pid>/cwd to the first path segment under $HOME/projects/,
-// else the full path.
-function repoFromCwd(pid) {
-  let cwd;
+// Pure privacy redaction for a spike top entry. Returns the fields to set
+// (cmd, repo, vault) on an entry.
+// - cmd and repo are kept ONLY when the process is in an agent tree
+//   (agentRoot non-null) OR its cwd is under $HOME/projects/.
+// - Always redact: if cwd or any argv element contains $HOME/Vault or
+//   $HOME/.vault (also the realpath of cwd), set cmd/repo to null and vault: true.
+// - Never log a full cwd: repo is the first path segment under $HOME/projects/,
+//   or null.
+export function redactEntry({ argv, cwd, agentRoot }, home) {
+  const vaultA = `${home}/Vault`;
+  const vaultB = `${home}/.vault`;
+  const projects = `${home}/projects/`;
+  let redact = false;
+  const realCwd = cwd ? tryRealpath(cwd) : null;
+  const inVault =
+    (cwd && (cwd.includes(vaultA) || cwd.includes(vaultB))) ||
+    (realCwd && (realCwd.includes(vaultA) || realCwd.includes(vaultB)));
+  const inProjects = cwd ? cwd.startsWith(projects) : false;
+  const argvText = (argv || []).join("\0");
+  const argvInVault =
+    argvText.includes(vaultA) || argvText.includes(vaultB);
+  if (inVault || argvInVault) redact = true;
+  const keep = (agentRoot !== null) || inProjects;
+  const cmd = keep && !redact ? capArgv(argv) : null;
+  const repo = keep && !redact && inProjects ? repoSegment(cwd, home) : null;
+  return { cmd, repo, vault: redact };
+}
+
+// realpath best-effort; null on failure.
+function tryRealpath(p) {
   try {
-    cwd = fs.readlinkSync(path.join("/proc", String(pid), "cwd"));
+    return fs.realpathSync(p);
   } catch {
     return null;
   }
-  const home = process.env.HOME || "";
+}
+
+function capArgv(argv) {
+  return (argv || []).join(" ").slice(0, 160);
+}
+
+// First path segment under $HOME/projects/, else null.
+function repoSegment(cwd, home) {
   const prefix = `${home}/projects/`;
-  if (cwd.startsWith(prefix)) {
-    const rest = cwd.slice(prefix.length);
-    const seg = rest.split("/")[0];
-    return seg ? `${home}/projects/${seg}` : prefix;
-  }
-  return cwd;
+  if (!cwd || !cwd.startsWith(prefix)) return null;
+  const rest = cwd.slice(prefix.length);
+  const seg = rest.split("/")[0];
+  return seg ? `${home}/projects/${seg}` : null;
 }
 
 // Module scope: the run loop's sleep timer and its resolver, so a signal can
@@ -403,20 +435,26 @@ function doPass({ sample = false } = {}) {
   }
   // --- spike sampler (loop only, never --once, never tests) ---
   if (!sample) {
-    prevTicks = ticksOf(result.procs);
     prevTs = Date.now();
     return { paused: false, ...result };
   }
   try {
     const now = Date.now();
     const elapsedMs = prevTs === null ? null : now - prevTs;
-    const loadavgText = os.loadavg().join(" ");
+    const root = defaultProcRoot();
+    let loadavgText = "";
+    try {
+      loadavgText = fs.readFileSync(path.join(root, "loadavg"), "utf8").trim();
+    } catch {
+      loadavgText = "";
+    }
     let psiCpuText = "";
     try {
-      psiCpuText = fs.readFileSync("/proc/pressure/cpu", "utf8");
+      psiCpuText = fs.readFileSync(path.join(root, "pressure", "cpu"), "utf8");
     } catch {
       psiCpuText = "";
     }
+    const home = process.env.HOME || "";
     const spike = spikeSample({
       procs: result.procs,
       prevTicks,
@@ -437,7 +475,20 @@ function doPass({ sample = false } = {}) {
         }
       }
       for (const entry of spike.top) {
-        entry.repo = repoFromCwd(entry.pid);
+        let cwd;
+        try {
+          cwd = fs.readlinkSync(path.join(root, String(entry.pid), "cwd"));
+        } catch {
+          cwd = null;
+        }
+        const redaction = redactEntry(
+          { argv: entry.argv, cwd, agentRoot: entry.agentRoot },
+          home,
+        );
+        entry.cmd = redaction.cmd;
+        entry.repo = redaction.repo;
+        entry.vault = redaction.vault;
+        delete entry.argv;
       }
       fs.appendFileSync(
         spikes,

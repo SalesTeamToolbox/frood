@@ -562,7 +562,7 @@ decides: which tests the train runs for a ticket (python convention → board ti
 
 ### workstation priority guard
 handler: orchestrator/ops/workstation/agent-priority.mjs runPass (systemd user service, 15 s loop with an interruptible sleep — SIGTERM/SIGINT exit 0 within 2 s; --once)
-decides: which agent process trees are reniced to nice>=10 per thread — never lowers a nice value, never touches a non-agent tree, excludes the Claude desktop UI; paused/resumed is printed once per pause transition; each spiking pass logs the top-8 CPU consumers (agent root, repo) to <stateDir>/spikes.jsonl (rotated at LOG_MAX to .1)
+decides: which agent process trees are reniced to nice>=10 per thread — never lowers a nice value, never touches a non-agent tree, excludes the Claude desktop UI; paused/resumed is printed once per pause transition; each spiking pass logs the top-8 CPU consumers (agent tree and ~/projects only; vault paths redacted) to <stateDir>/spikes.jsonl (rotated at LOG_MAX to .1)
 sibling traps: oc-worker load-based slots
 
 ### box-wide suite lock
