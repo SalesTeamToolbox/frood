@@ -347,3 +347,211 @@ test("unwritable SUITE_LOCK_ROOT: acquire returns 2 within 5 s, ERROR names the 
   assert.equal(fs.existsSync(path.join(root, "queue")), false, "no ticket/queue left behind");
   fs.chmodSync(parent, 0o755); // so the tmp() cleanup can remove the dir
 });
+
+// ----------------------------------------------------------- history logging
+
+// Bash script: source the lock, acquire+release, then dump history.jsonl.
+// `what` is passed through a single-quoted LABEL var so quotes/backslashes survive.
+function historyScript(root, what, extraEnv = []) {
+  const safeLabel = what.replace(/'/g, "'\\''");
+  return [
+    "set -u",
+    `source "${LOCK}"`,
+    `export SUITE_LOCK_ROOT="${root}"`,
+    "export SUITE_LOCK_POLL=0.2 SUITE_LOCK_BEAT=1 SUITE_LOCK_STALE=6 SUITE_LOCK_WAITER_STALE=5",
+    ...extraEnv,
+    `LABEL='${safeLabel}'`,
+    "suite_lock_acquire \"$LABEL\" || { echo ACQUIRE_FAIL; exit 1; }",
+    "suite_lock_release",
+    `HIST="\${SUITE_LOCK_DIR}/history.jsonl"`,
+    "[ -f \"$HIST\" ] && cat \"$HIST\" || echo NO_HISTORY",
+  ].join("\n");
+}
+
+function parseHistory(out) {
+  const lines = out.trim().split(/\n/).filter((l) => l.startsWith("{"));
+  assert.ok(lines.length > 0, "no history lines in: " + out);
+  return lines.map((l) => JSON.parse(l));
+}
+
+test("suite lock history: acquire then release writes two lines (acquire/release)", () => {
+  const root = tmp();
+  const script = path.join(tmp(), "hist-acquire-release.sh");
+  fs.writeFileSync(script, historyScript(root, "history test"));
+  fs.chmodSync(script, 0o755);
+  const r = runBash(script, { ...process.env }, 15);
+  assert.equal(r.status, 0, r.stderr);
+  const lines = parseHistory(r.stdout);
+  assert.equal(lines.length, 2, "expected 2 history lines, got " + lines.length);
+  assert.equal(lines[0].event, "acquire");
+  assert.equal(lines[0].what, "history test");
+  assert.ok(Number.isInteger(lines[0].pid) && lines[0].pid > 0);
+  assert.ok(typeof lines[0].wait_s === "number" && lines[0].wait_s >= 0);
+  assert.match(lines[0].at, /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/);
+  assert.equal(lines[1].event, "release");
+  assert.equal(lines[1].what, "history test");
+  assert.ok(typeof lines[1].held_s === "number" && lines[1].held_s >= 0);
+  assert.equal(lines[1].outcome, "released");
+  assert.equal(lines[1].pid, lines[0].pid, "same pid for acquire and release");
+});
+
+test("suite lock history: label with quote and backslash produces valid JSON", () => {
+  const root = tmp();
+  const script = path.join(tmp(), "hist-quote.sh");
+  fs.writeFileSync(script, historyScript(root, 'say "hi" \\done\\'));
+  fs.chmodSync(script, 0o755);
+  const r = runBash(script, { ...process.env }, 15);
+  assert.equal(r.status, 0, r.stderr);
+  const lines = parseHistory(r.stdout);
+  assert.ok(lines.length === 2, "expected 2 history lines");
+  assert.ok(
+    lines.every((l) => typeof l.what === "string" && !l.what.includes('"') && !l.what.includes("\\")),
+    "quote and backslash are escaped to space: " + JSON.stringify(lines),
+  );
+});
+
+test("suite lock history: file over 1 MiB rotates to .1", () => {
+  const root = tmp();
+  const hist = path.join(root, "history.jsonl");
+  fs.mkdirSync(path.join(root, "queue"), { recursive: true });
+  fs.mkdirSync(path.join(root, "held"), { recursive: true });
+  fs.writeFileSync(hist, "x".repeat(1048577)); // over 1 MiB
+  const script = path.join(tmp(), "hist-rotate.sh");
+  fs.writeFileSync(script, historyScript(root, "rotate test"));
+  fs.chmodSync(script, 0o755);
+  const r = runBash(script, { ...process.env }, 15);
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(fs.existsSync(hist + ".1"), "rotated .1 should exist: " + r.stdout);
+  const cur = fs.readFileSync(hist, "utf8").trim().split(/\n/).filter(Boolean);
+  assert.ok(cur.length > 0, "current history should have the new line");
+});
+
+test("suite lock history: SUITE_LOCK=0 writes a skip line", () => {
+  const root = tmp();
+  const script = path.join(tmp(), "hist-skip.sh");
+  fs.writeFileSync(
+    script,
+    [
+      "set -u",
+      `source "${LOCK}"`,
+      `export SUITE_LOCK_ROOT="${root}"`,
+      "export SUITE_LOCK_POLL=0.2 SUITE_LOCK_BEAT=1 SUITE_LOCK_STALE=6 SUITE_LOCK_WAITER_STALE=5",
+      "export SUITE_LOCK=0",
+      `suite_lock_acquire "skip test" || { echo ACQUIRE_FAIL; exit 1; }`,
+      `HIST="\${SUITE_LOCK_DIR}/history.jsonl"`,
+      "[ -f \"$HIST\" ] && cat \"$HIST\" || echo NO_HISTORY",
+    ].join("\n"),
+  );
+  fs.chmodSync(script, 0o755);
+  const r = runBash(script, { ...process.env }, 15);
+  assert.equal(r.status, 0, r.stderr);
+  const lines = parseHistory(r.stdout);
+  assert.ok(lines.some((l) => l.event === "skip"), "expected a skip line: " + JSON.stringify(lines));
+  const skip = lines.find((l) => l.event === "skip");
+  assert.equal(skip.what, "skip test");
+});
+
+test("suite lock history: label with tab and newline still yields valid JSON lines", () => {
+  const root = tmp();
+  const script = path.join(tmp(), "hist-ctrl.sh");
+  fs.writeFileSync(
+    script,
+    [
+      "set -u",
+      `source "${LOCK}"`,
+      `export SUITE_LOCK_ROOT="${root}"`,
+      "export SUITE_LOCK_POLL=0.2 SUITE_LOCK_BEAT=1 SUITE_LOCK_STALE=6 SUITE_LOCK_WAITER_STALE=5",
+      "LABEL=$'label\\twith\\ttab\\nand newline'",
+      "suite_lock_acquire \"$LABEL\" || { echo ACQUIRE_FAIL; exit 1; }",
+      "suite_lock_release",
+      `HIST="\${SUITE_LOCK_DIR}/history.jsonl"`,
+      "[ -f \"$HIST\" ] && cat \"$HIST\" || echo NO_HISTORY",
+    ].join("\n"),
+  );
+  fs.chmodSync(script, 0o755);
+  const r = runBash(script, { ...process.env }, 15);
+  assert.equal(r.status, 0, r.stderr);
+  const lines = r.stdout.trim().split(/\n/).filter((l) => l.startsWith("{"));
+  assert.ok(lines.length === 2, "expected 2 JSON lines: " + r.stdout);
+  for (const l of lines) {
+    const parsed = JSON.parse(l);
+    assert.ok(typeof parsed.what === "string", "what is a string");
+    assert.ok(!parsed.what.includes("\t"), "tab escaped: " + JSON.stringify(parsed.what));
+    assert.ok(!parsed.what.includes("\n"), "newline escaped: " + JSON.stringify(parsed.what));
+  }
+});
+
+test("suite lock history: empty stderr when history.jsonl is a directory", () => {
+  const root = tmp();
+  // Make history.jsonl a directory so the append must fail silently
+  fs.mkdirSync(path.join(root, "history.jsonl"), { recursive: true });
+  fs.mkdirSync(path.join(root, "queue"), { recursive: true });
+  fs.mkdirSync(path.join(root, "held"), { recursive: true });
+  const script = path.join(tmp(), "hist-dir-stderr.sh");
+  fs.writeFileSync(
+    script,
+    [
+      "set -u",
+      `source "${LOCK}"`,
+      `export SUITE_LOCK_ROOT="${root}"`,
+      "export SUITE_LOCK_POLL=0.2 SUITE_LOCK_BEAT=1 SUITE_LOCK_STALE=6 SUITE_LOCK_WAITER_STALE=5",
+      `suite_lock_acquire "dir test" || { echo ACQUIRE_FAIL; exit 1; }`,
+      "suite_lock_release",
+      "echo DONE",
+    ].join("\n"),
+  );
+  fs.chmodSync(script, 0o755);
+  const r = runBash(script, { ...process.env }, 15);
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes("DONE"), "release completed");
+  assert.equal(r.stderr.trim(), "", "stderr must be empty: " + r.stderr);
+});
+
+test("suite lock history: SUITE_LOCK=0 with missing root writes skip silently (empty stderr)", () => {
+  const root = tmp(); // does not exist yet
+  const script = path.join(tmp(), "hist-skip-stderr.sh");
+  fs.writeFileSync(
+    script,
+    [
+      "set -u",
+      `source "${LOCK}"`,
+      `export SUITE_LOCK_ROOT="${root}"`,
+      "export SUITE_LOCK_POLL=0.2 SUITE_LOCK_BEAT=1 SUITE_LOCK_STALE=6 SUITE_LOCK_WAITER_STALE=5",
+      "export SUITE_LOCK=0",
+      `suite_lock_acquire "skip missing root" || { echo ACQUIRE_FAIL; exit 1; }`,
+      `HIST="\${SUITE_LOCK_DIR}/history.jsonl"`,
+      "[ -f \"$HIST\" ] && cat \"$HIST\" || echo NO_HISTORY",
+      "echo DONE",
+    ].join("\n"),
+  );
+  fs.chmodSync(script, 0o755);
+  const r = runBash(script, { ...process.env }, 15);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr.trim(), "", "stderr must be empty on skip: " + r.stderr);
+  const lines = r.stdout.trim().split(/\n/).filter((l) => l.startsWith("{"));
+  assert.ok(lines.length >= 1, "expected at least a skip line");
+  const parsed = JSON.parse(lines.find((l) => JSON.parse(l).event === "skip"));
+  assert.equal(parsed.event, "skip");
+});
+
+test("suite lock release: held/ removed -> returns 0 under set -uo pipefail", () => {
+  const root = tmp();
+  const script = path.join(tmp(), "release-gone.sh");
+  fs.writeFileSync(
+    script,
+    [
+      "set -uo pipefail",
+      `source "${LOCK}"`,
+      `export SUITE_LOCK_ROOT="${root}"`,
+      "export SUITE_LOCK_POLL=0.2 SUITE_LOCK_BEAT=1 SUITE_LOCK_STALE=6 SUITE_LOCK_WAITER_STALE=5",
+      `suite_lock_acquire "gone test" || { echo ACQUIRE_FAIL; exit 1; }`,
+      "rm -rf \"$SUITE_LOCK_DIR/held\"",
+      "suite_lock_release",
+      "echo RELEASE_CODE $?",
+    ].join("\n"),
+  );
+  fs.chmodSync(script, 0o755);
+  const r = runBash(script, { ...process.env }, 15);
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes("RELEASE_CODE 0"), "release returns 0: " + r.stdout);
+});

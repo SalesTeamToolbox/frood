@@ -5,7 +5,7 @@ import os from "os";
 import path from "path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
-import { runPass, writePassLog, realSetPriority } from "../ops/workstation/agent-priority.mjs";
+import { runPass, writePassLog, realSetPriority, spikeSample, readProc, ticksOf, redactEntry } from "../ops/workstation/agent-priority.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WORKSTATION = path.join(HERE, "..", "ops", "workstation");
@@ -180,6 +180,32 @@ test("runPass never throws on a proc root it cannot read", () => {
   const res = runPass({ procRoot: "/definitely/does/not/exist", setPriority: (t, v) => calls.push([t, v]), uid: ME });
   assert.equal(res.lowered, 0);
   assert.deepEqual(calls, []);
+});
+
+test("readProc: ticks and rssKiB from stat/status fields", () => {
+  const root = tmp();
+  // stat field 14=utime=1234 (rest[11]), field 15=stime=5678 (rest[12]) -> ticks=6912; status VmRSS: 20480 kB -> 20 MiB
+  const dir = path.join(root, "777");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "stat"), `777 (foo) S 1 2 3 4 5 6 7 8 9 10 1234 5678 9 10 11 12 0 0 0 0 0 0 0 0 0 0 0`);
+  fs.writeFileSync(path.join(dir, "cmdline"), "foo\0");
+  fs.writeFileSync(path.join(dir, "status"), `Uid:\t1000\t1000\t1000\t1000\nVmRSS:\t20480 kB\n`);
+  const p = readProc(root, "777");
+  assert.ok(p, "readProc should return a proc entry");
+  assert.equal(p.ticks, 6912, "ticks = utime+stime = 1234+5678");
+  assert.equal(p.rssKiB, 20480, "rssKiB from VmRSS");
+  assert.equal(Math.round(p.rssKiB / 1024), 20, "20480 KiB -> 20 MiB");
+});
+
+test("ticksOf: pid -> number map from procs", () => {
+  const procs = makeProcs([
+    procEntry(1000, { ticks: 100 }),
+    procEntry(1001, { ticks: 200 }),
+  ]);
+  const m = ticksOf(procs);
+  assert.equal(m.get(1000), 100);
+  assert.equal(m.get(1001), 200);
+  assert.equal(m.get(9999), undefined);
 });
 
 // ----------------------------------------------------------- argv regex anchoring
@@ -599,4 +625,239 @@ test("loop: pause prints exactly once, resume exactly once on unpause", { timeou
   } finally {
     cleanup();
   }
+});
+
+// ----------------------------------------------------------- spikeSample unit tests
+
+function procEntry(pid, { comm, argv, exe, ppid = 1, ticks, rssKiB }) {
+  return { pid, ppid, comm, argv: argv || [], exe: exe || "", nice: 0, uid: ME, ticks, rssKiB };
+}
+
+function makeProcs(entries) {
+  const m = new Map();
+  for (const e of entries) m.set(e.pid, e);
+  return m;
+}
+
+test("spikeSample: under threshold returns null", () => {
+  const procs = makeProcs([
+    procEntry(1000, { comm: "foo", argv: ["foo"], ticks: 1000 }),
+  ]);
+  const prev = new Map([[1000, 500]]);
+  const s = spikeSample({
+    procs, prevTicks: prev, elapsedMs: 1000,
+    loadavgText: "1.00 2.00 3.00", psiCpuText: "some avg10=1.00", nproc: 10,
+  });
+  assert.equal(s, null);
+});
+
+test("spikeSample: over load1 returns top sorted by cpu", () => {
+  const procs = makeProcs([
+    procEntry(1000, { comm: "a", argv: ["a"], ticks: 2000 }),
+    procEntry(1001, { comm: "b", argv: ["b"], ticks: 3000 }),
+    procEntry(1002, { comm: "c", argv: ["c"], ticks: 1000 }),
+  ]);
+  const prev = new Map([[1000, 1000], [1001, 1000], [1002, 500]]);
+  const s = spikeSample({
+    procs, prevTicks: prev, elapsedMs: 1000,
+    loadavgText: "10.00 5.00 2.00", psiCpuText: "some avg10=1.00", nproc: 10,
+  });
+  assert.ok(s, "should be spiking under load1");
+  assert.equal(s.load1, 10);
+  assert.equal(s.load5, 5);
+  assert.equal(s.top.length, 3);
+  // b: (3000-1000)/100/1*100 = 2000%; a: (2000-1000)/100/1*100 = 1000%; c: (1000-500)/100/1*100 = 500%
+  assert.equal(s.top[0].pid, 1001);
+  assert.equal(s.top[1].pid, 1000);
+  assert.equal(s.top[2].pid, 1002);
+  assert.ok(s.top[0].cpu > s.top[1].cpu);
+  assert.ok(s.top[1].cpu > s.top[2].cpu);
+});
+
+test("spikeSample: PSI avg10 alone triggers it", () => {
+  const procs = makeProcs([
+    procEntry(1000, { comm: "foo", argv: ["foo"], ticks: 2000 }),
+  ]);
+  const prev = new Map([[1000, 1000]]);
+  // load1 well below threshold, but PSI some avg10 = 25 >= 20
+  const s = spikeSample({
+    procs, prevTicks: prev, elapsedMs: 1000,
+    loadavgText: "0.50 0.50 0.50", psiCpuText: "some avg10=25.00", nproc: 10,
+  });
+  assert.ok(s, "PSI avg10 alone should trigger");
+  assert.equal(s.cpuSomeAvg10, 25);
+});
+
+test("spikeSample: agentRoot resolves through ppid chain", () => {
+  // 1000 is an agent root (claude), 1001 is its child (node), 1002 is 1001's child
+  const procs = makeProcs([
+    procEntry(1000, { comm: "claude", argv: ["claude"], exe: "/home/user/.config/Claude/claude-code/claude", ticks: 1000 }),
+    procEntry(1001, { comm: "node", argv: ["node", "vitest"], exe: "/usr/bin/node", ppid: 1000, ticks: 2000 }),
+    procEntry(1002, { comm: "node", argv: ["node", "worker"], exe: "/usr/bin/node", ppid: 1001, ticks: 3000 }),
+  ]);
+  const prev = new Map([[1000, 500], [1001, 500], [1002, 500]]);
+  const s = spikeSample({
+    procs, prevTicks: prev, elapsedMs: 1000,
+    loadavgText: "10.00 5.00 2.00", psiCpuText: "some avg10=1.00", nproc: 10,
+  });
+  assert.ok(s);
+  const top1002 = s.top.find((e) => e.pid === 1002);
+  assert.ok(top1002, "pid 1002 should be in top");
+  assert.deepEqual(top1002.agentRoot, { pid: 1000, comm: "claude" });
+});
+
+test("spikeSample: agentRoot is null when no ancestor is an agent root", () => {
+  const procs = makeProcs([
+    procEntry(1000, { comm: "foo", argv: ["foo"], exe: "/usr/bin/foo", ticks: 2000 }),
+  ]);
+  const prev = new Map([[1000, 1000]]);
+  const s = spikeSample({
+    procs, prevTicks: prev, elapsedMs: 1000,
+    loadavgText: "10.00 5.00 2.00", psiCpuText: "some avg10=1.00", nproc: 10,
+  });
+  assert.ok(s);
+  assert.equal(s.top[0].agentRoot, null);
+});
+
+test("spikeSample: cmd cap holds at 160 chars", () => {
+  const longArgv = ["node", "x".repeat(200)];
+  const procs = makeProcs([
+    procEntry(1000, { comm: "node", argv: longArgv, exe: "/usr/bin/node", ticks: 2000 }),
+  ]);
+  const prev = new Map([[1000, 1000]]);
+  const s = spikeSample({
+    procs, prevTicks: prev, elapsedMs: 1000,
+    loadavgText: "10.00 5.00 2.00", psiCpuText: "some avg10=1.00", nproc: 10,
+  });
+  assert.ok(s);
+  assert.ok(s.top[0].cmd.length <= 160, `cmd should be capped at 160, got ${s.top[0].cmd.length}`);
+  assert.ok(s.top[0].cmd.endsWith("x".repeat(200).slice(0, 160 - 5)), "cmd should contain the long arg (capped)");
+});
+
+test("spikeSample: no previous ticks returns null (first pass)", () => {
+  const procs = makeProcs([
+    procEntry(1000, { comm: "foo", argv: ["foo"], ticks: 2000 }),
+  ]);
+  const s = spikeSample({
+    procs, prevTicks: null, elapsedMs: 1000,
+    loadavgText: "10.00 5.00 2.00", psiCpuText: "some avg10=1.00", nproc: 10,
+  });
+  assert.equal(s, null, "first pass with no prevTicks returns null");
+});
+
+test("spikeSample: rssKiB converts to rssMiB", () => {
+  const procs = makeProcs([
+    procEntry(1000, { comm: "foo", argv: ["foo"], ticks: 2000, rssKiB: 102400 }),
+  ]);
+  const prev = new Map([[1000, 1000]]);
+  const s = spikeSample({
+    procs, prevTicks: prev, elapsedMs: 1000,
+    loadavgText: "10.00 5.00 2.00", psiCpuText: "some avg10=1.00", nproc: 10,
+  });
+  assert.ok(s);
+  assert.equal(s.top[0].rssMiB, 100, "102400 KiB -> 100 MiB");
+});
+
+test("spikeSample: null rssKiB yields null rssMiB", () => {
+  const procs = makeProcs([
+    procEntry(1000, { comm: "foo", argv: ["foo"], ticks: 2000, rssKiB: null }),
+  ]);
+  const prev = new Map([[1000, 1000]]);
+  const s = spikeSample({
+    procs, prevTicks: prev, elapsedMs: 1000,
+    loadavgText: "10.00 5.00 2.00", psiCpuText: "some avg10=1.00", nproc: 10,
+  });
+  assert.ok(s);
+  assert.equal(s.top[0].rssMiB, null);
+});
+
+// ----------------------------------------------------------- redactEntry (privacy)
+
+const FAKE_HOME = "/tmp/fakehome";
+
+function redact({ argv, cwd, agentRoot = null }) {
+  return redactEntry({ argv, cwd, agentRoot }, FAKE_HOME);
+}
+
+test("redactEntry: vault path in argv on a non-agent proc -> cmd/repo null, vault true", () => {
+  const r = redact({ argv: ["bash", "-c", "cd /tmp/fakehome/Vault/secret && ls"], cwd: "/tmp/fakehome/Vault/secret" });
+  assert.equal(r.cmd, null);
+  assert.equal(r.repo, null);
+  assert.equal(r.vault, true);
+});
+
+test("redactEntry: vault cwd with relative argv -> null", () => {
+  const r = redact({ argv: ["ls"], cwd: "/tmp/fakehome/.vault/work" });
+  assert.equal(r.cmd, null);
+  assert.equal(r.repo, null);
+  assert.equal(r.vault, true);
+});
+
+test("redactEntry: vault path in argv INSIDE an agent tree -> null", () => {
+  const r = redact({ argv: ["node", "/tmp/fakehome/Vault/tool/run.js"], cwd: "/tmp/fakehome/projects/myapp", agentRoot: { pid: 1, comm: "claude" } });
+  assert.equal(r.cmd, null);
+  assert.equal(r.repo, null);
+  assert.equal(r.vault, true);
+});
+
+test("redactEntry: non-agent proc with cwd outside projects -> cmd/repo null, comm kept", () => {
+  const r = redact({ argv: ["sleep", "100"], cwd: "/tmp" });
+  assert.equal(r.cmd, null);
+  assert.equal(r.repo, null);
+  assert.equal(r.vault, false);
+});
+
+test("redactEntry: agent proc under projects -> cmd and repo kept", () => {
+  const r = redact({ argv: ["node", "vitest"], cwd: "/tmp/fakehome/projects/myapp", agentRoot: { pid: 1, comm: "claude" } });
+  assert.equal(r.cmd, "node vitest");
+  assert.equal(r.repo, "/tmp/fakehome/projects/myapp");
+  assert.equal(r.vault, false);
+});
+
+test("redactEntry: agent root but cwd outside projects and no vault -> cmd kept, repo null", () => {
+  const r = redact({ argv: ["node", "worker"], cwd: "/tmp", agentRoot: { pid: 1, comm: "claude" } });
+  assert.equal(r.cmd, "node worker");
+  assert.equal(r.repo, null);
+  assert.equal(r.vault, false);
+});
+
+test("redactEntry: non-agent proc under projects -> cmd kept, repo kept", () => {
+  const r = redact({ argv: ["make", "test"], cwd: "/tmp/fakehome/projects/foo" });
+  assert.equal(r.cmd, "make test");
+  assert.equal(r.repo, "/tmp/fakehome/projects/foo");
+  assert.equal(r.vault, false);
+});
+
+test("redactEntry: realpath of cwd under vault redacts even if cwd string does not", () => {
+  // /tmp/fakehome/projects/foo is a symlink to /tmp/fakehome/Vault: cwd string has no vault,
+  // but realpath does. Agent root null, but under projects -> keep=true, redact=true.
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "redact-home-"));
+  fs.mkdirSync(`${tmpHome}/projects`, { recursive: true });
+  fs.mkdirSync(`${tmpHome}/Vault`, { recursive: true });
+  fs.symlinkSync(`${tmpHome}/Vault`, `${tmpHome}/projects/foo`);
+  const r = redactEntry({ argv: ["ls"], cwd: `${tmpHome}/projects/foo`, agentRoot: null }, tmpHome);
+  assert.equal(r.cmd, null);
+  assert.equal(r.repo, null);
+  assert.equal(r.vault, true);
+  fs.rmSync(tmpHome, { recursive: true, force: true });
+});
+
+test("redactEntry: relative vault paths in argv are redacted even when cmd would be kept", () => {
+  for (const argv of [
+    ["viewer", "../../Vault/private/doc.pdf"],
+    ["cat", "Vault/p/doc.txt"],
+    ["tool", "--file=../.vault/key"],
+    ["less", "../../../fakehome/vault/notes"],
+  ]) {
+    const r = redact({ argv, cwd: "/tmp/fakehome/projects/foo/sub", agentRoot: { pid: 1, comm: "claude" } });
+    assert.equal(r.cmd, null, argv.join(" "));
+    assert.equal(r.repo, null, argv.join(" "));
+    assert.equal(r.vault, true, argv.join(" "));
+  }
+});
+
+test("redactEntry: a word merely containing 'vault' is not redacted", () => {
+  const r = redact({ argv: ["node", "vaultwarden-sync.mjs"], cwd: "/tmp/fakehome/projects/foo", agentRoot: { pid: 1, comm: "claude" } });
+  assert.equal(r.vault, false);
+  assert.equal(r.repo, "/tmp/fakehome/projects/foo");
 });
