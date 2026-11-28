@@ -841,3 +841,23 @@ test("redactEntry: realpath of cwd under vault redacts even if cwd string does n
   assert.equal(r.vault, true);
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
+
+test("redactEntry: relative vault paths in argv are redacted even when cmd would be kept", () => {
+  for (const argv of [
+    ["viewer", "../../Vault/private/doc.pdf"],
+    ["cat", "Vault/p/doc.txt"],
+    ["tool", "--file=../.vault/key"],
+    ["less", "../../../fakehome/vault/notes"],
+  ]) {
+    const r = redact({ argv, cwd: "/tmp/fakehome/projects/foo/sub", agentRoot: { pid: 1, comm: "claude" } });
+    assert.equal(r.cmd, null, argv.join(" "));
+    assert.equal(r.repo, null, argv.join(" "));
+    assert.equal(r.vault, true, argv.join(" "));
+  }
+});
+
+test("redactEntry: a word merely containing 'vault' is not redacted", () => {
+  const r = redact({ argv: ["node", "vaultwarden-sync.mjs"], cwd: "/tmp/fakehome/projects/foo", agentRoot: { pid: 1, comm: "claude" } });
+  assert.equal(r.vault, false);
+  assert.equal(r.repo, "/tmp/fakehome/projects/foo");
+});

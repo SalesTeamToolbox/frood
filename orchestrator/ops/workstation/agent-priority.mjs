@@ -360,6 +360,7 @@ function attachAgentRoots(procs, top) {
 //   $HOME/.vault (also the realpath of cwd), set cmd/repo to null and vault: true.
 // - Never log a full cwd: repo is the first path segment under $HOME/projects/,
 //   or null.
+const VAULT_SEGMENT_RE = /(^|[\/=:\s])\.?vault(\/|$)/i;
 export function redactEntry({ argv, cwd, agentRoot }, home) {
   const vaultA = `${home}/Vault`;
   const vaultB = `${home}/.vault`;
@@ -371,8 +372,18 @@ export function redactEntry({ argv, cwd, agentRoot }, home) {
     (realCwd && (realCwd.includes(vaultA) || realCwd.includes(vaultB)));
   const inProjects = cwd ? cwd.startsWith(projects) : false;
   const argvText = (argv || []).join("\0");
+  // Absolute match, plus any path segment named Vault/.vault (any case) so relative forms such as
+  // `../../Vault/x`, `Vault/p.txt` or `--file=../.vault/k` are caught too, and any element that
+  // resolves under the vault from this cwd.
+  const resolvesIntoVault = (el) => {
+    if (!cwd || typeof el !== "string") return false;
+    const r = path.resolve(cwd, el.includes("=") ? el.slice(el.indexOf("=") + 1) : el);
+    return r === vaultA || r === vaultB || r.startsWith(vaultA + "/") || r.startsWith(vaultB + "/");
+  };
   const argvInVault =
-    argvText.includes(vaultA) || argvText.includes(vaultB);
+    argvText.includes(vaultA) || argvText.includes(vaultB) ||
+    (argv || []).some((el) => VAULT_SEGMENT_RE.test(String(el)) || resolvesIntoVault(el)) ||
+    (cwd ? VAULT_SEGMENT_RE.test(cwd) : false);
   if (inVault || argvInVault) redact = true;
   const keep = (agentRoot !== null) || inProjects;
   const cmd = keep && !redact ? capArgv(argv) : null;
