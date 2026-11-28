@@ -140,25 +140,25 @@ topic: docs/atlas/routes.md
 
 ### /llm/v1/messages
 handler: dashboard.server.create_app.llm_messages
-decides: Anthropic-compatible message response
+decides: Anthropic-compatible message response (gateway token required: 401 without a valid bearer or x-api-key, 503 when FROOD_GATEWAY_TOKEN is empty)
 sibling traps: /llm/chat/completions, /v1/messages, /llm/models
 topic: docs/atlas/routes.md
 
 ### /v1/messages
 handler: dashboard.server.create_app.anthropic_sdk_proxy
-decides: Anthropic SDK-compatible message response (root proxy path)
+decides: Anthropic SDK-compatible message response, root proxy path (gateway token required: 401 without a valid bearer or x-api-key, 503 when FROOD_GATEWAY_TOKEN is empty)
 sibling traps: /llm/v1/messages, /llm/chat/completions, /llm/models
 topic: docs/atlas/routes.md
 
 ### /llm/models
 handler: dashboard.server.create_app.llm_models
-decides: available model list enumerated from PROVIDER_MODELS
+decides: available model list enumerated from PROVIDER_MODELS (gateway token required: 401 without a valid bearer or x-api-key, 503 when FROOD_GATEWAY_TOKEN is empty)
 sibling traps: /llm/chat/completions, /llm/config, /llm/embeddings
 topic: docs/atlas/routes.md
 
 ### /llm/v1/models
 handler: dashboard.server.create_app.llm_models
-decides: available model list (same handler as /llm/models)
+decides: available model list, same handler as /llm/models (gateway token required: 401 without a valid bearer or x-api-key, 503 when FROOD_GATEWAY_TOKEN is empty)
 sibling traps: /llm/models, /llm/chat/completions
 topic: docs/atlas/routes.md
 

@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
+from core.config import Settings
 from dashboard.server import create_app
 
 
@@ -22,10 +23,22 @@ def _make_client(**kwargs) -> TestClient:
     return TestClient(app)
 
 
-def test_llm_models_endpoint():
+def _token_client(monkeypatch) -> tuple[TestClient, str]:
+    """Client with a configured gateway token (mirrors tests/test_gateway.py _client_for).
+
+    The legacy /llm/models routes require FROOD_GATEWAY_TOKEN; patch
+    dashboard.server.settings with a token before create_app, then send it.
+    Never set the token via os.environ.
+    """
+    token = "test-legacy-models-token"
+    monkeypatch.setattr("dashboard.server.settings", Settings(frood_gateway_token=token))
+    return _make_client(), token
+
+
+def test_llm_models_endpoint(monkeypatch):
     """LLM-01: GET /llm/models returns available models."""
-    client = _make_client()
-    resp = client.get("/llm/models")
+    client, token = _token_client(monkeypatch)
+    resp = client.get("/llm/models", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     data = resp.json()
     assert "data" in data
@@ -35,10 +48,10 @@ def test_llm_models_endpoint():
     print(f"✓ LLM-01: /llm/models returns {len(data['data'])} models")
 
 
-def test_llm_models_v1_endpoint():
+def test_llm_models_v1_endpoint(monkeypatch):
     """LLM-02: GET /llm/v1/models works as alias."""
-    client = _make_client()
-    resp = client.get("/llm/v1/models")
+    client, token = _token_client(monkeypatch)
+    resp = client.get("/llm/v1/models", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     data = resp.json()
     assert "data" in data
@@ -81,9 +94,7 @@ def test_llm_chat_completions_no_model():
 
 
 if __name__ == "__main__":
-    test_llm_models_endpoint()
-    test_llm_models_v1_endpoint()
     test_llm_config_endpoint()
     test_llm_chat_completions_requires_json()
     test_llm_chat_completions_no_model()
-    print("\n✓ All LLM proxy tests passed!")
+    print("\n✓ LLM proxy tests passed (models tests need pytest for monkeypatch)!")

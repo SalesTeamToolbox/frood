@@ -44,7 +44,7 @@ from dashboard.auth import (
     require_admin,
     verify_password,
 )
-from dashboard.gateway import build_gateway_router
+from dashboard.gateway import build_gateway_router, check_gateway_auth
 from dashboard.websocket_manager import WebSocketManager
 
 logger = logging.getLogger("frood.server")
@@ -1805,6 +1805,11 @@ def create_app(
             },
         }
 
+    # Legacy Anthropic-style routes require the same gateway token as /gw.
+    # Read once here so a test's settings object controls it (never os.environ
+    # at request time, never logged, never echoed in an error body).
+    _legacy_gateway_token = settings.frood_gateway_token
+
     @app.post("/llm/v1/messages")
     async def llm_messages(request: Request):
         """Anthropic-compatible Messages API endpoint for Claude Code /model switching.
@@ -1816,6 +1821,9 @@ def create_app(
         This endpoint translates to the internal provider routing and returns
         an Anthropic-compatible response.
         """
+        denied = check_gateway_auth(request, _legacy_gateway_token)
+        if denied is not None:
+            return denied
         try:
             body = await request.json()
         except Exception:
@@ -1893,6 +1901,9 @@ def create_app(
         capability-ranked provider chain as all other LLM endpoints, with
         automatic fallback when Anthropic credits run out.
         """
+        denied = check_gateway_auth(request, _legacy_gateway_token)
+        if denied is not None:
+            return denied
         try:
             body = await request.json()
         except Exception:
@@ -1954,7 +1965,7 @@ def create_app(
 
     @app.get("/llm/models")
     @app.get("/llm/v1/models")
-    async def llm_models():
+    async def llm_models(request: Request):
         """Return available models for LLM proxy.
 
         Enumerates every provider in PROVIDER_MODELS (zen, openrouter, anthropic,
@@ -1962,6 +1973,9 @@ def create_app(
         dropped nvidia and openai. Now generic — any new provider added to
         PROVIDER_MODELS shows up automatically.
         """
+        denied = check_gateway_auth(request, _legacy_gateway_token)
+        if denied is not None:
+            return denied
         from core.agent_manager import PROVIDER_MODELS
 
         # owned_by is mostly a display label; zen uses "opencode" for historical reasons
