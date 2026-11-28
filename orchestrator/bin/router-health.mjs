@@ -390,6 +390,20 @@ export async function check({ probeModels = false, probeAll = false, models = un
   const usage = collectUsage(undefined, Date.now(), usageLimits);
   const floor = (usageLimits.low_headroom_pct ?? LOW_HEADROOM_PCT_DEFAULT) / 100;
   if (usageLimits.missing) report.notes.push("usage: no usage-limits.json — Go monthly assumed $60; create one to set your plan cap");
+  // go-pacing G2: one info line for the v2 Go ledger beside the old-window
+  // `usage:` note. Only when the ledger exists; headroom numbers above still
+  // read the old windows until G6.
+  if (usage.go_v2 != null) {
+    const v2 = usage.go_v2;
+    const mo = v2.used_mo == null ? "mo ?/100 (no period anchor)" : `mo ${v2.used_mo.toFixed(1)}%/100 ($${v2.usd_mo.toFixed(2)})`;
+    let line = `go ledger v2 (${v2.plan}): 5h ${v2.used_5h.toFixed(1)}%/20 · wk ${v2.used_wk.toFixed(1)}%/50 · ${mo}`;
+    if (v2.unrated > 0) line += ` · ${v2.unrated} unrated`;
+    if (usage.pools?.go) {
+      const g = usage.pools.go;
+      line += ` (old: 5h $${g.spend_5h.toFixed(2)} 7d $${g.spend_7d.toFixed(2)} mtd $${g.spend_mtd.toFixed(2)})`;
+    }
+    report.notes.push(line);
+  }
   const probed = new Map();
   // Quota marks are re-tested on --probe instead of being trusted until they expire: a quota's retry-after can be
   // days away (a monthly cap), and a renewed or topped-up plan never tells us. One re-test per mark key per run, so a

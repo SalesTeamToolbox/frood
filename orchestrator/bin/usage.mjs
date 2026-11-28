@@ -19,10 +19,16 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { fiveHourWindow, goConfig, periodBounds, sumUsd, weekBounds } from "./go-pace.mjs";
 
 export const LOW_HEADROOM_PCT_DEFAULT = 15;
 
-// Per-1M-token [input, output, cacheRead]. Reasoning bills as output.
+// Per-1M-token [input, output, cacheRead] for the OLD trailing-window ledger.
+// Never a Claude/Anthropic entry: owner rule, Claude runs on the Claude Code
+// subscription, never through OpenCode Go (go-pacing G1 enforces this in lint
+// and pool-health). A Go model missing here costs null → unmetered in the old
+// floor; the v2 ledger (goCost) instead prices it at the highest rate so an
+// unknown Go model can never look free.
 const GO_RATES = {
   "mimo-v2.6-flash": [0.14, 0.28, 0.0028],
   "deepseek-v4.1-flash": [0.15, 0.6, 0.003],
@@ -52,6 +58,71 @@ const CMDC_MODEL_CAPS = {
   "claude-sonnet-5-5": 10,
   "deepseek/deepseek-v4-pro": 20,
 };
+
+// Per-model monthly allowance limits in dollars for the v2 Go ledger (allowance
+// percent = 100 * usd / L). Keys are opencode model ids (without the
+// `opencode-go/` prefix). `go` from the plan Handoff (G-D2, re-read
+// 2026-11-27); `go-plus` from the Go Plus column of opencode.ai/docs/console/go.
+// A model in neither column uses the smallest limit of its column and counts
+// `unrated`. No Claude entry is costed here — see GO_RATES above.
+export const GO_MODEL_LIMITS = Object.freeze({
+  go: Object.freeze({
+    "deepseek-v4.1-flash": 100,
+    "mimo-v2.6-flash": 60,
+    "muse-spark-1.3-contributor": 60,
+    "muse-spark-1.2-contributor": 60,
+    "glm-5.3-flash": 60,
+    "glm-5.3": 200,
+    "glm-5.2": 60,
+    "minimax-m3": 60,
+    "minimax-m3.1-flash": 20,
+    "kimi-k2.7-code": 60,
+    "kimi-k3": 15,
+    "kimi-k3.1-pro": 15,
+    "longcat-2.5": 60,
+    "deepseek-v4-pro": 15,
+    "mimo-v2.6-pro": 15,
+    "claude-haiku-5-5": 15,
+    "gpt-6-luna": 15,
+    "gpt-5.6-luna": 15,
+    "grok-4.7": 15,
+    "qwen3.8-max": 15,
+    "qwen4-max": 15,
+    "step-5-preview": 15,
+    "gemini-4-argon": 30,
+    "hy4-preview": 30,
+    "hy4": 60,
+    "hy3": 60,
+  }),
+  "go-plus": Object.freeze({
+    "deepseek-v4.1-flash": 200,
+    "mimo-v2.6-flash": 120,
+    "muse-spark-1.3-contributor": 120,
+    "muse-spark-1.2-contributor": 120,
+    "glm-5.3-flash": 180,
+    "glm-5.3": 400,
+    "glm-5.2": 180,
+    "minimax-m3": 180,
+    "minimax-m3.1-flash": 80,
+    "kimi-k2.7-code": 180,
+    "kimi-k3": 60,
+    "kimi-k3.1-pro": 60,
+    "longcat-2.5": 240,
+    "deepseek-v4-pro": 60,
+    "mimo-v2.6-pro": 60,
+    "claude-haiku-5-5": 60,
+    "gpt-6-luna": 60,
+    "gpt-5.6-luna": 60,
+    "grok-4.7": 60,
+    "qwen3.8-max": 60,
+    "qwen4-max": 60,
+    "step-5-preview": 60,
+    "gemini-4-argon": 120,
+    "hy4-preview": 120,
+    "hy4": 240,
+    "hy3": 240,
+  }),
+});
 
 export function orchDir() {
   return path.join(process.env.ORCH_HOME || os.homedir(), ".config", "orchestrator");
@@ -114,6 +185,168 @@ export function rowCost(provider, id, tokens, ts) {
   const t = tokens || {};
   const inp = (t.input || 0) + (t.reasoning || 0);
   return ((inp * r[0] + (t.output || 0) * r[1]) * peak + (t.cache_read || 0) * r[2]) / 1e6;
+}
+
+// Highest per-column rate across GO_RATES: an unknown Go model is priced here,
+// so it can never look free. [input, output, cacheRead].
+const GO_MAX_RATE = (() => {
+  let inp = 0, out = 0, read = 0;
+  for (const r of Object.values(GO_RATES)) {
+    if (r[0] > inp) inp = r[0];
+    if (r[1] > out) out = r[1];
+    if (r[2] > read) read = r[2];
+  }
+  return [inp, out, read];
+})();
+
+/**
+ * List-cost dollars of one v2 ledger message. `tokens` carries the
+ * session_message numeric fields (input/output/reasoning/cache_read/cache_write,
+ * with a nested cache {read, write} also accepted). Returns {usd, unrated}:
+ * a `-free` id is $0 and never unrated; all tokens null/absent is $0 (the
+ * caller counts it in no_tokens); an id missing from GO_RATES is priced at the
+ * highest rate in each column and unrated. DeepSeek peak x2 on input+output
+ * (isPeak); cache_write is billed at the input rate; reasoning as input.
+ */
+export function goCost(id, tokens, ts) {
+  const t = tokens || {};
+  const cacheRead = t.cache_read ?? t.cache?.read;
+  const cacheWrite = t.cache_write ?? t.cache?.write;
+  const anyPresent = t.input != null || t.output != null || t.reasoning != null || cacheRead != null || cacheWrite != null;
+  if (!anyPresent) return { usd: 0, unrated: false };
+  if (typeof id === "string" && id.endsWith("-free")) return { usd: 0, unrated: false };
+  const known = typeof id === "string" ? GO_RATES[id] : undefined;
+  const r = known ?? GO_MAX_RATE;
+  const peak = typeof id === "string" && /deepseek/i.test(id) && isPeak(ts) ? 2 : 1;
+  const inp = (t.input || 0) + (t.reasoning || 0);
+  const usd = ((inp * r[0] + (t.output || 0) * r[1]) * peak + (cacheRead || 0) * r[2] + (cacheWrite || 0) * r[0]) / 1e6;
+  return { usd, unrated: known == null };
+}
+
+// The exact v2 ledger query. Numeric fields only, via json_extract: `data`
+// never appears outside json_extract(, and message text (`content`) is never
+// selected, so a marker planted in content cannot reach the parsed rows.
+export const GO_LEDGER_SQL = `SELECT time_created, json_extract(data,'$.model.providerID') AS provider, json_extract(data,'$.model.id') AS id, json_extract(data,'$.time.completed') AS completed, json_extract(data,'$.tokens.input') AS ti, json_extract(data,'$.tokens.output') AS tout, json_extract(data,'$.tokens.reasoning') AS tr, json_extract(data,'$.tokens.cache.read') AS tcr, json_extract(data,'$.tokens.cache.write') AS tcw FROM session_message WHERE type='assistant' AND json_extract(data,'$.model.providerID') = 'opencode-go'`;
+
+/**
+ * The v2 Go ledger: per-message cost from session_message rows (type
+ * assistant, provider opencode-go). Returns null when there is no db or no
+ * session_message table (or on any read error), else
+ * {rows: [{t, usd, model}] sorted by t, unrated, no_tokens}. t is
+ * time.completed ?? time_created (epoch ms); rows with no tokens cost $0 and
+ * count in no_tokens. Read-only open, closed in finally.
+ */
+export function goLedger(dbPath = ocDbPath()) {
+  let db = null;
+  try {
+    if (!fs.existsSync(dbPath)) return null;
+    db = new DatabaseSync(dbPath, { readOnly: true });
+    db.exec("PRAGMA busy_timeout=2000;");
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((t) => t.name);
+    if (!tables.includes("session_message")) return null;
+    const found = db.prepare(GO_LEDGER_SQL).all();
+    const rows = [];
+    let unrated = 0;
+    let noTokens = 0;
+    for (const m of found) {
+      if (m.provider !== "opencode-go") continue;
+      const t = m.completed ?? m.time_created;
+      if (!Number.isFinite(t)) continue;
+      const tokens = { input: m.ti, output: m.tout, reasoning: m.tr, cache_read: m.tcr, cache_write: m.tcw };
+      const priced = goCost(m.id, tokens, t);
+      if (priced.usd === 0) {
+        const cacheRead = tokens.cache_read;
+        const cacheWrite = tokens.cache_write;
+        if (tokens.input == null && tokens.output == null && tokens.reasoning == null && cacheRead == null && cacheWrite == null) noTokens++;
+      }
+      if (priced.unrated) unrated++;
+      rows.push({ t, usd: priced.usd, model: m.id });
+    }
+    rows.sort((a, b) => a.t - b.t);
+    return { rows, unrated, no_tokens: noTokens };
+  } catch {
+    return null;
+  } finally {
+    try { db?.close(); } catch { /* ignore */ }
+  }
+}
+
+const round4 = (v) => (Number.isFinite(v) ? Math.round(v * 1e4) / 1e4 : null);
+
+/**
+ * The v2 Go ledger in allowance-percent. Pure function of the ledger, now and
+ * limits. Units (owner correction 2026-11-27): used_* and recent are
+ * allowance-percent (sum of row pct = 100 * usd / L), usd_* the same windows
+ * in dollars. Plan from limits.go.plan ("go"/"go-plus", else "go");
+ * caps are {5h: 20, wk: 50, mo: 100}. 5h is the fixed window over rows with
+ * usd > 0 (none open: used_5h/usd_5h 0, R_5h null); wk starts Monday 00:00
+ * UTC; mo starts at the paid period (period_anchor; none: used_mo, usd_mo,
+ * R_mo, elapsed_mo_h and period_src null). recent is the percent over the
+ * last pace.recent_hours. R_* are ISO strings; percents and dollars rounded
+ * to 4 decimals. Null when the ledger is null.
+ */
+export function goV2(ledger, now = Date.now(), limits = loadLimits()) {
+  if (ledger == null) return null;
+  const top = limits && typeof limits === "object" ? limits : {};
+  const goBlock = top.go && typeof top.go === "object" && !Array.isArray(top.go) ? top.go : null;
+  const plan = goBlock?.plan === "go-plus" ? "go-plus" : "go";
+  const column = GO_MODEL_LIMITS[plan];
+  const minLimit = Math.min(...Object.values(column));
+  const cfg = goConfig(top);
+  const rows = Array.isArray(ledger.rows) ? ledger.rows : [];
+  const withPct = rows.map((r) => {
+    const L = (typeof r.model === "string" && column[r.model]) || minLimit;
+    return { t: r.t, usd: Number.isFinite(r.usd) ? r.usd : 0, pct: 100 * (Number.isFinite(r.usd) ? r.usd : 0) / L };
+  });
+  // A model with a rate but no limit row still costs allowance against the
+  // fallback limit: count it unrated here (the ledger already counted the
+  // rate-unknown ones). Free (-free) rows cost nothing and stay rated.
+  let unrated = Number.isFinite(ledger.unrated) ? ledger.unrated : 0;
+  for (const r of rows) {
+    if (typeof r.model === "string" && !r.model.endsWith("-free") && column[r.model] == null && GO_RATES[r.model] != null && Number.isFinite(r.usd) && r.usd > 0) unrated++;
+  }
+  const noTokens = Number.isFinite(ledger.no_tokens) ? ledger.no_tokens : 0;
+  // sumUsd sums a row's usd field: for percents pass rows mapped to {t, usd: pct}.
+  const past = withPct.filter((r) => r.t <= now);
+  const forPct = past.map((r) => ({ t: r.t, usd: r.pct }));
+  const forUsd = past.map((r) => ({ t: r.t, usd: r.usd }));
+  const w5 = fiveHourWindow(withPct.filter((r) => r.usd > 0).map((r) => r.t), now);
+  const wk = weekBounds(now);
+  const mo = periodBounds(cfg.period_anchor, now);
+  const used5h = w5 ? sumUsd(forPct, w5.start, w5.end) : 0;
+  const usd5h = w5 ? sumUsd(forUsd, w5.start, w5.end) : 0;
+  const usedWk = wk ? sumUsd(forPct, wk.start, Infinity) : 0;
+  const usdWk = wk ? sumUsd(forUsd, wk.start, Infinity) : 0;
+  const recentFrom = now - cfg.pace.recent_hours * 3600_000;
+  const recent = sumUsd(forPct, recentFrom, Infinity);
+  const out = {
+    plan,
+    caps: { "5h": 20, wk: 50, mo: 100 },
+    used_5h: round4(used5h),
+    used_wk: round4(usedWk),
+    used_mo: null,
+    usd_5h: round4(usd5h),
+    usd_wk: round4(usdWk),
+    usd_mo: null,
+    R_5h: w5 ? new Date(w5.end).toISOString() : null,
+    R_wk: wk ? new Date(wk.end).toISOString() : null,
+    R_mo: null,
+    elapsed_mo_h: null,
+    recent: round4(recent),
+    unrated,
+    no_tokens: noTokens,
+    period_src: null,
+  };
+  if (mo) {
+    const usedMo = sumUsd(forPct, mo.start, Infinity);
+    const usdMo = sumUsd(forUsd, mo.start, Infinity);
+    out.used_mo = round4(usedMo);
+    out.usd_mo = round4(usdMo);
+    out.R_mo = new Date(mo.end).toISOString();
+    out.elapsed_mo_h = round4((now - mo.start) / 3600_000);
+    out.period_src = "anchor";
+  }
+  return out;
 }
 
 function openDb(dbPath) {
@@ -243,11 +476,11 @@ function assumptions(limits) {
 
 export function collectUsage(dbPath = ocDbPath(), now = Date.now(), limits = loadLimits()) {
   const db = openDb(dbPath);
-  if (!db) return { now, pools: null, assumptions: ["no opencode db — usage unknown, nothing skipped for headroom"] };
+  if (!db) return { now, pools: null, go_v2: null, assumptions: ["no opencode db — usage unknown, nothing skipped for headroom"] };
   try {
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((t) => t.name);
     const table = tables.includes("session_v2") ? "session_v2" : tables.includes("session") ? "session" : null;
-    if (!table) return { now, pools: null, assumptions: ["no session table — usage unknown"] };
+    if (!table) return { now, pools: null, go_v2: null, assumptions: ["no session table — usage unknown"] };
     const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
     const has = (c) => (cols.includes(c) ? c : null);
     // Legacy `session` table lacks token/model columns: presence only, never spend.
@@ -262,9 +495,17 @@ export function collectUsage(dbPath = ocDbPath(), now = Date.now(), limits = loa
         cost: rowCost(split.provider, split.id, { input: r.tokens_input, output: r.tokens_output, reasoning: r.tokens_reasoning, cache_read: r.tokens_cache_read }, r.time_created),
       };
     }).filter(Boolean);
-    return rollup(rows, now, limits);
+    const rolled = rollup(rows, now, limits);
+    // Second, correct Go ledger from per-message rows beside the old headroom
+    // floor: the old pools and every old key stay byte-identical.
+    const ledger = goLedger(dbPath);
+    const v2 = goV2(ledger, now, limits);
+    const assumptions = v2 == null
+      ? [...rolled.assumptions, "go ledger v2: no message ledger"]
+      : rolled.assumptions;
+    return { ...rolled, go_v2: v2, assumptions };
   } catch {
-    return { now, pools: null, assumptions: ["opencode db unreadable — usage unknown, nothing skipped for headroom"] };
+    return { now, pools: null, go_v2: null, assumptions: ["opencode db unreadable — usage unknown, nothing skipped for headroom"] };
   } finally {
     try { db.close(); } catch { /* ignore */ }
   }
@@ -287,5 +528,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(im
     for (const [m, v] of Object.entries(p.models ?? {})) {
       if (v.cap_mtd != null) console.log(`  ${m}: mtd $${v.spend_mtd.toFixed(2)}/$${v.cap_mtd} · headroom ${pct(v.headroom_mtd)}`);
     }
+  }
+  const v2 = u.go_v2;
+  if (v2 != null) {
+    const mo = v2.used_mo == null ? "mo ?/100 (no period anchor)" : `mo ${v2.used_mo.toFixed(1)}%/100 ($${v2.usd_mo.toFixed(2)})`;
+    console.log(`go ledger v2 (${v2.plan}): 5h ${v2.used_5h.toFixed(1)}%/20 · wk ${v2.used_wk.toFixed(1)}%/50 · ${mo}${v2.unrated > 0 ? ` · ${v2.unrated} unrated` : ""}`);
   }
 }

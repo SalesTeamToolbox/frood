@@ -660,3 +660,39 @@ test("a Claude-via-Go model shows as blocked by policy in the free inventory; ot
   assert.doesNotMatch(r.stdout, /^opencode-go\/mimo-v2\.6-flash  blocked/m, r.stdout);
   assert.match(r.stdout, /^opencode-go\/mimo-v2\.6-flash  (in-chain|unused)/m, r.stdout);
 });
+
+// ── go-pacing G2: one info line when the v2 message ledger exists ─────────────
+test("go ledger v2 info line appears beside the usage note, with the old windows suffixed", () => {
+  const h = home(ALL);
+  const { DatabaseSync } = require("node:sqlite");
+  const db = new DatabaseSync(path.join(h, "oc.db"));
+  try {
+    db.exec(`CREATE TABLE session_v2 (id TEXT PRIMARY KEY, title TEXT, model TEXT, cost REAL,
+      time_created INTEGER, time_updated INTEGER, tokens_input INTEGER, tokens_output INTEGER,
+      tokens_reasoning INTEGER, tokens_cache_read INTEGER, directory TEXT);`);
+    db.prepare("INSERT INTO session_v2 VALUES (?,?,?,?,?,?,?,?,?,?,?)").run(
+      "s0", "old", JSON.stringify({ providerID: "opencode-go", id: "mimo-v2.6-flash" }),
+      0, Date.now() - 3600_000, Date.now() - 3600_000, 10e6, 0, 0, 0, "/tmp/x");
+    db.exec(`CREATE TABLE session_message (id TEXT PRIMARY KEY, sessionID TEXT, type TEXT, data TEXT, time_created INTEGER);`);
+    db.prepare("INSERT INTO session_message VALUES (?,?,?,?,?)").run(
+      "m0", "ses0", "assistant",
+      JSON.stringify({
+        model: { providerID: "opencode-go", id: "mimo-v2.6-flash" },
+        time: { completed: Date.now() - 3600_000 },
+        tokens: { input: 1e6, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      }),
+      Date.now() - 3600_000);
+  } finally { db.close(); }
+  const r = run(h, Object.values(ALL));
+  // The old headroom floor is untouched: $1.40 of the $12 5h cap leaves Go
+  // healthy, so the first-chain agents are still used; the v2 line carries the
+  // allowance-percent windows plus the old dollar windows.
+  // (Old-window dollars are shape-matched: a run in the first hour of a month
+  // puts the message in last month's mtd window.)
+  assert.match(r.stdout, /^worker\s+use worker-nvidia/m, r.stdout);
+  assert.match(
+    r.stdout,
+    /^note: go ledger v2 \(go\): 5h \d+\.\d%\/20 · wk \d+\.\d%\/50 · mo \?\/100 \(no period anchor\) \(old: 5h \$\d+\.\d\d 7d \$\d+\.\d\d mtd \$\d+\.\d\d\)$/m,
+    r.stdout,
+  );
+});
