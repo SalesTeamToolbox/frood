@@ -8,7 +8,7 @@ Run terminal Claude Code through Frood's gateway at `http://127.0.0.1:8000/gw`.
 **Modes:**
 - `go` — Claude Code using OpenCode Go models (kimi-k3 / glm-5.3-flash / deepseek-v4.1-flash)
   through the gateway. Go spends the same allowance as the oc-workers.
-- `nvidia` — Claude Code using Nvidia models (nemotron-3.5-super-vl / qwen3-coder)
+- `nvidia` — Claude Code using Nvidia models (minimax-m3.1-flash / nemotron-3.5-lightning)
   through the gateway.
 - `cc` — Claude Code on the owner's normal Anthropic subscription (no gateway, no tier vars).
 - `status` — Print one-line Frood health, gateway reachability/auth, the go and nvidia tier

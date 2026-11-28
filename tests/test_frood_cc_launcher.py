@@ -21,9 +21,9 @@ _SPEC.loader.exec_module(launcher)
 
 GO_IDS = ["kimi-k3", "glm-5.3-flash", "deepseek-v4.1-flash"]
 NV_IDS = [
-    "nvidia/nemotron-3.5-super-vl-120b-a12b",
-    "nvidia/nemotron-3.5-super-vl-120b-a12b",
-    "qwen/qwen3-coder-480b-a35b-instruct",
+    "minimaxai/minimax-m3.1-flash",
+    "minimaxai/minimax-m3.1-flash",
+    "nvidia/nemotron-3.5-lightning-30b-a3b",
 ]
 
 
@@ -90,9 +90,9 @@ def test_build_env_go():
 
 def test_build_env_nvidia_ids():
     env = launcher.build_env("nvidia", "t", {"HOME": "/h"})
-    assert env["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "nvidia/nemotron-3.5-super-vl-120b-a12b"
-    assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "nvidia/nemotron-3.5-super-vl-120b-a12b"
-    assert env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "qwen/qwen3-coder-480b-a35b-instruct"
+    assert env["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "minimaxai/minimax-m3.1-flash"
+    assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "minimaxai/minimax-m3.1-flash"
+    assert env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "nvidia/nemotron-3.5-lightning-30b-a3b"
 
 
 def test_build_env_cc_no_gateway_vars():
@@ -319,8 +319,8 @@ def test_no_check_skips_tier_list_for_nvidia(monkeypatch, capsys):
     assert exc.value.code == 1
     assert launched == []
     out = capsys.readouterr().out
-    assert "nvidia/nemotron-3.5-super-vl-120b-a12b" in out
-    assert "qwen/qwen3-coder-480b-a35b-instruct" in out
+    assert "minimaxai/minimax-m3.1-flash" in out
+    assert "nvidia/nemotron-3.5-lightning-30b-a3b" in out
     assert "--no-check to launch anyway" in out
 
 

@@ -36,21 +36,25 @@ TOKEN = "test-gateway-token-abc123"
 GO_KEY = "go-test-key-xyz-999"
 NVIDIA_KEY = "nv-test-key-aaa-111"
 GO_MODELS = "deepseek-v4.1-flash,glm-5.3-flash,kimi-k3"
-NVIDIA_MODELS = "nvidia/nemotron-3.5-super-vl-120b-a12b,qwen/qwen3-coder-480b-a35b-instruct"
+NVIDIA_MODELS = (
+    "minimaxai/minimax-m3.1-flash,nvidia/nemotron-3.5-lightning-30b-a3b,"
+    "nvidia/nemotron-3.5-super-vl-120b-a12b"
+)
 GO_BASE = "https://opencode.ai/zen/go/v1"
 NVIDIA_BASE = "https://integrate.api.nvidia.com/v1"
 FALLBACK = (
-    "kimi-k3=nvidia/nemotron-3.5-super-vl-120b-a12b,"
-    "glm-5.3-flash=nvidia/nemotron-3.5-super-vl-120b-a12b,"
-    "deepseek-v4.1-flash=qwen/qwen3-coder-480b-a35b-instruct"
+    "kimi-k3=minimaxai/minimax-m3.1-flash,"
+    "glm-5.3-flash=minimaxai/minimax-m3.1-flash,"
+    "deepseek-v4.1-flash=nvidia/nemotron-3.5-lightning-30b-a3b"
 )
 
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
 
 _REAL_ASYNC_CLIENT = httpx.AsyncClient
 
-NV_UPSTREAM = "nvidia/nemotron-3.5-super-vl-120b-a12b"
-QWEN_UPSTREAM = "qwen/qwen3-coder-480b-a35b-instruct"
+NV_UPSTREAM = "minimaxai/minimax-m3.1-flash"
+LITE_UPSTREAM = "nvidia/nemotron-3.5-lightning-30b-a3b"
+SUPER_UPSTREAM = "nvidia/nemotron-3.5-super-vl-120b-a12b"
 
 
 def _settings(**overrides) -> Settings:
@@ -68,7 +72,9 @@ def _settings(**overrides) -> Settings:
     return Settings(**kw)
 
 
-def _client_for(monkeypatch, settings_obj, handler, go_key=GO_KEY, usage_path=None, db_path=None):
+def _client_for(
+    monkeypatch, settings_obj, handler, go_key=GO_KEY, usage_path=None, db_path=None, sleeper=None
+):
     """create_app TestClient with a host-dispatching mock upstream.
 
     ``usage_path`` pins the pace snapshot; when None a missing temp path is
@@ -84,6 +90,8 @@ def _client_for(monkeypatch, settings_obj, handler, go_key=GO_KEY, usage_path=No
     def _router_with_test_host(**kw):
         kw.pop("test_client_host", None)
         kw.pop("go_usage_path", None)
+        if sleeper is not None:
+            kw["sleeper"] = sleeper
         return original(test_client_host="testclient", go_usage_path=usage_path, **kw)
 
     monkeypatch.setattr("dashboard.server.build_gateway_router", _router_with_test_host)
@@ -126,12 +134,26 @@ def _msg_body(model="kimi-k3", stream=False, **extra):
 def _tables(**overrides) -> RouteTables:
     kw = {
         "go": {"kimi-k3": "kimi-k3", "glm-5.3-flash": "glm-5.3-flash"},
-        "nvidia": {NV_UPSTREAM: NV_UPSTREAM, QWEN_UPSTREAM: QWEN_UPSTREAM},
+        "nvidia": {
+            NV_UPSTREAM: NV_UPSTREAM,
+            LITE_UPSTREAM: LITE_UPSTREAM,
+            SUPER_UPSTREAM: SUPER_UPSTREAM,
+        },
         "fallback": {"kimi-k3": NV_UPSTREAM},
         "nvidia_key": NVIDIA_KEY,
     }
     kw.update(overrides)
     return RouteTables(**kw)
+
+
+def _make_sleeper():
+    """A recording sleeper for the gateway's Nvidia 429 waits: (calls, sleep)."""
+    calls: list[float] = []
+
+    async def _sleep(delay):
+        calls.append(float(delay))
+
+    return calls, _sleep
 
 
 def _nvidia_sse_chunks():
@@ -389,7 +411,7 @@ def test_plan_empty_fallback_map_means_no_fallback():
 
 def test_plan_unmapped_id_uses_first_nvidia_when_map_set():
     """GW-T3-01p: a non-empty map without this id still uses the first Nvidia id."""
-    tables = _tables(fallback={"other": QWEN_UPSTREAM})
+    tables = _tables(fallback={"other": LITE_UPSTREAM})
     candidates, error = plan_route("kimi-k3", tables, "ok")
     assert error is None
     assert candidates == [("go", "kimi-k3"), ("nvidia", NV_UPSTREAM)]
@@ -878,26 +900,180 @@ def test_pace_over_no_fallback_429(monkeypatch, tmp_path):
 # -- bar 7: Nvidia 429 ----------------------------------------------------------
 
 
-def test_nvidia_429_mapped(monkeypatch):
-    """GW-T3-07: Nvidia 429 => Anthropic rate_limit_error + x-should-retry."""
+def test_nvidia_429_mapped(monkeypatch, caplog):
+    """GW-T3-07 (gw-nv-models): a surviving Nvidia 429 maps to rate_limit_error.
+
+    The gateway retries the same model first (retry-after 11 s, twice, then
+    the 30 s cap stops the third wait); the survivor keeps ``retry-after``
+    but never carries ``x-should-retry``, so Claude Code's own backoff takes
+    over.
+    """
+    seen: list[httpx.Request] = []
+    calls, fake_sleep = _make_sleeper()
 
     def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
         return httpx.Response(
             429,
             headers={"content-type": "application/json", "retry-after": "11"},
             json={"error": {"message": "nvidia busy", "type": "rate_limit_exceeded"}},
         )
 
-    client = _client_for(monkeypatch, _settings(), handler)
-    resp = client.post("/gw/v1/messages", json=_msg_body(model=NV_UPSTREAM), headers=AUTH)
+    client = _client_for(monkeypatch, _settings(), handler, sleeper=fake_sleep)
+    with caplog.at_level(logging.INFO, logger="frood.gateway"):
+        resp = client.post("/gw/v1/messages", json=_msg_body(model=NV_UPSTREAM), headers=AUTH)
     assert resp.status_code == 429
-    assert resp.headers["x-should-retry"] == "false"
+    assert "x-should-retry" not in resp.headers
     assert resp.headers["retry-after"] == "11"
     data = resp.json()
     assert data["type"] == "error"
     assert data["error"]["type"] == "rate_limit_error"
     assert data["error"]["message"] == "nvidia busy"
     assert resp.headers["x-frood-route"] == f"nvidia:{NV_UPSTREAM}"
+    # 11 + 11 = 22 s waited; a third 11 s wait would pass the 30 s cap.
+    assert calls == [11.0, 11.0]
+    assert len(seen) == 3
+    retries = [r for r in caplog.records if "gateway nvidia retry" in r.getMessage()]
+    assert len(retries) == 2
+    assert "attempt=1" in retries[0].getMessage()
+    assert "attempt=2" in retries[1].getMessage()
+
+
+def test_nvidia_429_then_200_streaming(monkeypatch, caplog):
+    """gw-nv-models: Nvidia 429 (retry-after 3) then 200 => 200 SSE stream, one 3 s wait."""
+    attempts = {"n": 0}
+    calls, fake_sleep = _make_sleeper()
+    stream_200 = _nvidia_stream_handler([])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            return httpx.Response(
+                429,
+                headers={"content-type": "application/json", "retry-after": "3"},
+                json={"error": {"message": "nvidia busy", "type": "rate_limit_exceeded"}},
+            )
+        return stream_200(request)
+
+    client = _client_for(monkeypatch, _settings(), handler, sleeper=fake_sleep)
+    with caplog.at_level(logging.INFO, logger="frood.gateway"):
+        resp = client.post(
+            "/gw/v1/messages", json=_msg_body(model=NV_UPSTREAM, stream=True), headers=AUTH
+        )
+    assert resp.status_code == 200
+    assert resp.headers["x-frood-route"] == f"nvidia:{NV_UPSTREAM}"
+    assert "event: message_start" in resp.text
+    assert f'"model":"{NV_UPSTREAM}"' in resp.text
+    assert calls == [3.0]
+    assert attempts["n"] == 2
+    retries = [r for r in caplog.records if "gateway nvidia retry" in r.getMessage()]
+    assert len(retries) == 1
+    assert "status=429" in retries[0].getMessage()
+    assert "provider=nvidia" in retries[0].getMessage()
+    assert "attempt=1" in retries[0].getMessage()
+
+
+def test_nvidia_429_then_200_no_retry_after(monkeypatch):
+    """gw-nv-models: Nvidia 429 without retry-after then 200 => 200 JSON, one 2 s wait."""
+    attempts = {"n": 0}
+    calls, fake_sleep = _make_sleeper()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            return httpx.Response(
+                429,
+                headers={"content-type": "application/json"},
+                json={"error": {"message": "nvidia busy", "type": "rate_limit_exceeded"}},
+            )
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            json=_nvidia_json_payload(),
+        )
+
+    client = _client_for(monkeypatch, _settings(), handler, sleeper=fake_sleep)
+    resp = client.post("/gw/v1/messages", json=_msg_body(model=NV_UPSTREAM), headers=AUTH)
+    assert resp.status_code == 200
+    assert resp.headers["x-frood-route"] == f"nvidia:{NV_UPSTREAM}"
+    assert resp.json()["model"] == NV_UPSTREAM
+    assert calls == [2.0]
+    assert attempts["n"] == 2
+
+
+def test_nvidia_429_four_times_drops_should_retry(monkeypatch, caplog):
+    """gw-nv-models: four Nvidia 429s => 429 with no x-should-retry; 2/4/8 s waits (14 s)."""
+    seen: list[httpx.Request] = []
+    calls, fake_sleep = _make_sleeper()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            429,
+            headers={"content-type": "application/json"},
+            json={"error": {"message": "nvidia busy", "type": "rate_limit_exceeded"}},
+        )
+
+    client = _client_for(monkeypatch, _settings(), handler, sleeper=fake_sleep)
+    with caplog.at_level(logging.INFO, logger="frood.gateway"):
+        resp = client.post(
+            "/gw/v1/messages", json=_msg_body(model=NV_UPSTREAM, stream=True), headers=AUTH
+        )
+    assert resp.status_code == 429
+    assert "x-should-retry" not in resp.headers
+    assert "retry-after" not in resp.headers
+    data = resp.json()
+    assert data["error"]["type"] == "rate_limit_error"
+    assert resp.headers["x-frood-route"] == f"nvidia:{NV_UPSTREAM}"
+    assert calls == [2.0, 4.0, 8.0]
+    assert sum(calls) <= 30.0
+    assert len(seen) == 4
+    retries = [r for r in caplog.records if "gateway nvidia retry" in r.getMessage()]
+    assert len(retries) == 3
+
+
+def test_go_429_last_candidate_keeps_should_retry(monkeypatch, tmp_path, caplog):
+    """gw-nv-models: a Go-only 429 on the last candidate keeps x-should-retry: false."""
+    go_seen: list[httpx.Request] = []
+
+    def go_handler(request: httpx.Request) -> httpx.Response:
+        go_seen.append(request)
+        return httpx.Response(
+            429,
+            headers={"content-type": "application/json", "retry-after": "7"},
+            json={"type": "error", "error": {"type": "rate_limit_error", "message": "slow"}},
+        )
+
+    client = _client_for(
+        monkeypatch,
+        _settings(gateway_go_fallback=""),
+        _split_handler(go_handler, _nvidia_stream_handler([])),
+        usage_path=str(tmp_path / "missing.jsonl"),
+    )
+    with caplog.at_level(logging.INFO, logger="frood.gateway"):
+        resp = client.post("/gw/v1/messages", json=_msg_body(model="kimi-k3"), headers=AUTH)
+    assert resp.status_code == 429
+    assert resp.headers["x-should-retry"] == "false"
+    assert resp.headers["retry-after"] == "7"
+    assert resp.headers["x-frood-route"] == "go:kimi-k3"
+    assert len(go_seen) == 1
+    fallbacks = [r for r in caplog.records if "gateway fallback" in r.getMessage()]
+    assert fallbacks == []
+
+
+# -- gw-nv-models: config/gateway default parity --------------------------------
+
+
+def test_gateway_defaults_match_config_defaults(monkeypatch):
+    """gw-nv-models: the Settings defaults and the gateway DEFAULTs are identical."""
+    field_defaults = Settings()
+    assert field_defaults.gateway_nvidia_models == gw_module.DEFAULT_NVIDIA_MODELS
+    assert field_defaults.gateway_go_fallback == gw_module.DEFAULT_GO_FALLBACK
+    monkeypatch.delenv("GATEWAY_NVIDIA_MODELS", raising=False)
+    monkeypatch.delenv("GATEWAY_GO_FALLBACK", raising=False)
+    from_env = Settings.from_env()
+    assert from_env.gateway_nvidia_models == gw_module.DEFAULT_NVIDIA_MODELS
+    assert from_env.gateway_go_fallback == gw_module.DEFAULT_GO_FALLBACK
 
 
 # -- bar 8: routes + models ------------------------------------------------------
@@ -926,7 +1102,7 @@ def test_models_lists_nvidia_only_with_key(monkeypatch, tmp_path):
     """GW-T3-08b: Nvidia ids appear in /gw/v1/models only when the key is set."""
     client = _client_for(monkeypatch, _settings(), _nvidia_stream_handler([]))
     ids = [m["id"] for m in client.get("/gw/v1/models", headers=AUTH).json()["data"]]
-    assert NV_UPSTREAM in ids and QWEN_UPSTREAM in ids
+    assert NV_UPSTREAM in ids and LITE_UPSTREAM in ids and SUPER_UPSTREAM in ids
     assert "deepseek-v4.1-flash" in ids
 
     client = _client_for(
@@ -936,7 +1112,7 @@ def test_models_lists_nvidia_only_with_key(monkeypatch, tmp_path):
         db_path=str(tmp_path / "nope-nvidia.db"),
     )
     ids = [m["id"] for m in client.get("/gw/v1/models", headers=AUTH).json()["data"]]
-    assert NV_UPSTREAM not in ids and QWEN_UPSTREAM not in ids
+    assert NV_UPSTREAM not in ids and LITE_UPSTREAM not in ids and SUPER_UPSTREAM not in ids
     assert "deepseek-v4.1-flash" in ids
 
 
@@ -1176,14 +1352,14 @@ def test_models_lists_nvidia_lazily_from_db(monkeypatch, tmp_path):
         usage_path=str(tmp_path / "missing.jsonl"),
     )
     ids = [m["id"] for m in client.get("/gw/v1/models", headers=AUTH).json()["data"]]
-    assert NV_UPSTREAM not in ids and QWEN_UPSTREAM not in ids
+    assert NV_UPSTREAM not in ids and LITE_UPSTREAM not in ids and SUPER_UPSTREAM not in ids
 
     # Same router (no rebuild): add the row, clear the per-process cache, lazy
     # resolution picks it up on the next request.
     _write_nvidia_credential_db(db, "nv-db-key-111")
     gw_module._go_key_cache.clear()
     ids = [m["id"] for m in client.get("/gw/v1/models", headers=AUTH).json()["data"]]
-    assert NV_UPSTREAM in ids and QWEN_UPSTREAM in ids
+    assert NV_UPSTREAM in ids and LITE_UPSTREAM in ids and SUPER_UPSTREAM in ids
 
 
 # -- gw-t3 carry-overs (critic r2 / senior r2) ---------------------------------
