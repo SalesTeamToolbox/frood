@@ -113,8 +113,12 @@ def anthropic_to_openai(
             text_parts: list[str] = []
             tool_calls: list[dict[str, Any]] = []
             has_image = False
+            content_directly_set = False
 
-            if isinstance(content, list):
+            if isinstance(content, str):
+                oai_msg["content"] = content
+                content_directly_set = True
+            elif isinstance(content, list):
                 for b in content:
                     if not isinstance(b, dict):
                         continue
@@ -143,28 +147,29 @@ def anthropic_to_openai(
                     if b.get("cache_control"):
                         _drop_once(warnings, "cache_control_dropped")
 
-            if tool_calls:
-                oai_msg["tool_calls"] = tool_calls
-                if text_parts:
-                    oai_msg["content"] = "\n\n".join(text_parts)
+            if not content_directly_set:
+                if tool_calls:
+                    oai_msg["tool_calls"] = tool_calls
+                    if text_parts:
+                        oai_msg["content"] = "\n\n".join(text_parts)
+                    else:
+                        oai_msg["content"] = None
                 else:
-                    oai_msg["content"] = None
-            else:
-                if has_image:
-                    # Build content parts: text + image_url parts.
-                    parts: list[dict[str, Any]] = []
-                    if isinstance(content, list):
-                        for b in content:
-                            if not isinstance(b, dict):
-                                continue
-                            btype = b.get("type")
-                            if btype == "text":
-                                parts.append({"type": "text", "text": b.get("text", "")})
-                            elif btype == "image":
-                                parts.append(_openai_image_url_part(b))
-                    oai_msg["content"] = parts
-                else:
-                    oai_msg["content"] = "\n\n".join(text_parts) if text_parts else ""
+                    if has_image:
+                        # Build content parts: text + image_url parts.
+                        parts: list[dict[str, Any]] = []
+                        if isinstance(content, list):
+                            for b in content:
+                                if not isinstance(b, dict):
+                                    continue
+                                btype = b.get("type")
+                                if btype == "text":
+                                    parts.append({"type": "text", "text": b.get("text", "")})
+                                elif btype == "image":
+                                    parts.append(_openai_image_url_part(b))
+                        oai_msg["content"] = parts
+                    else:
+                        oai_msg["content"] = "\n\n".join(text_parts) if text_parts else ""
 
             openai_messages.append(oai_msg)
 
@@ -308,7 +313,10 @@ def anthropic_to_openai(
     openai_body["messages"] = openai_messages
     if oai_body_tools is not None:
         openai_body["tools"] = oai_body_tools
-    openai_body["tool_choice"] = oai_tool_choice
+    # Emit tool_choice only when the request sets it or tools are present;
+    # a strict OpenAI-compatible upstream may 400 on an unrequested choice.
+    if tool_choice is not None or oai_body_tools is not None:
+        openai_body["tool_choice"] = oai_tool_choice
 
     if isinstance(tool_choice, dict) and tool_choice.get("disable_parallel_tool_use"):
         openai_body["parallel_tool_calls"] = False

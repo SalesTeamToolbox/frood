@@ -337,6 +337,114 @@ def test_tool_result_tool_use_id_and_tool_call_id():
     assert "orphan_tool_use" not in warnings
 
 
+def test_assistant_string_content_preserved():
+    """Round-3 #1: assistant with string content round-trips; text is not blanked."""
+    body = {
+        "messages": [
+            {"role": "user", "content": "What is the weather?"},
+            {"role": "assistant", "content": "It is sunny in NYC."},
+            {"role": "user", "content": "And tomorrow?"},
+        ],
+    }
+    openai_body, warnings = anthropic_to_openai(body, "m")
+    assert openai_body["messages"] == [
+        {"role": "user", "content": "What is the weather?"},
+        {"role": "assistant", "content": "It is sunny in NYC."},
+        {"role": "user", "content": "And tomorrow?"},
+    ]
+    assert warnings == []
+
+
+def test_tool_choice_emitted_only_when_set_or_tools():
+    """Round-3 #2: no tool_choice and no tools => tool_choice key absent."""
+    body = {"messages": [{"role": "user", "content": "hi"}]}
+    openai_body, _ = anthropic_to_openai(body, "m")
+    assert "tool_choice" not in openai_body
+    assert "tools" not in openai_body
+
+
+def test_tool_result_image_dropped():
+    """Round-3 #3a: tool_result containing an image => "[image omitted]" + tool_result_image_dropped."""
+    body = {
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "t1",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/png",
+                                    "data": "X",
+                                },
+                            },
+                            {"type": "text", "text": "here"},
+                        ],
+                    },
+                ],
+            }
+        ],
+    }
+    openai_body, warnings = anthropic_to_openai(body, "m")
+    tool = openai_body["messages"][0]
+    assert tool["content"] == "[image omitted]\n\nhere"
+    assert "tool_result_image_dropped" in warnings
+
+
+def test_tool_result_empty_content():
+    """Round-3 #3b: empty tool_result content => content: ""."""
+    body = {
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "t1", "content": ""},
+                ],
+            }
+        ],
+    }
+    openai_body, _ = anthropic_to_openai(body, "m")
+    assert openai_body["messages"] == [
+        {"role": "tool", "tool_call_id": "t1", "content": ""},
+    ]
+
+
+def test_streamed_tool_call_no_id():
+    """Round-3 #3c: streamed tool call with no id => toolu_<uuid hex>."""
+    chunk = {
+        "id": "cmpl_1",
+        "object": "chat.completion.chunk",
+        "created": 1,
+        "model": "m",
+        "choices": [
+            {
+                "index": 0,
+                "delta": {
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "type": "function",
+                            "function": {"name": "fn", "arguments": "{}"},
+                        }
+                    ]
+                },
+            }
+        ],
+    }
+    sse = ("data: " + json.dumps(chunk, separators=(",", ":")) + "\n\n").encode("utf-8")
+    tr = StreamTranslator("test-model", clock=lambda: 0.0)
+    out = tr.feed(sse) + tr.finish()
+    # The tool_use block must carry a generated toolu_ id (never empty).
+    assert b"event: content_block_start" in out
+    assert b'"type":"tool_use"' in out
+    assert b'"id":"toolu_' in out
+    assert b'"id":""' not in out
+
+
 # ---------------------------------------------------------------------------
 # StreamTranslator (golden stream tests)
 # ---------------------------------------------------------------------------
