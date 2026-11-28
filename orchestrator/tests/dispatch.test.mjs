@@ -252,9 +252,100 @@ test("plan: one ticket editing a file the other calls still holds/serialises, in
 
 test("plan: a blast-radius test path counts as an edit", () => {
   const r = mk();
+  ticket(r, "t-fly", { scope: ["a.mjs", "tests/shared.test.mjs"], tests: ["tests/shared.test.mjs"], stage: "working" });
+  ticket(r, "t-new", { scope: ["b.mjs", "tests/shared.test.mjs"], tests: ["tests/shared.test.mjs"] });
+  assert.deepEqual(plan(r, "t-new").held[0].in_flight, ["t-fly: both edit tests/shared.test.mjs"]);
+});
+
+test("plan: a blast-radius test outside scope is run-only: no hold, one group", () => {
+  const r = mk();
   ticket(r, "t-fly", { scope: ["a.mjs"], tests: ["tests/shared.test.mjs"], stage: "working" });
   ticket(r, "t-new", { scope: ["b.mjs"], tests: ["tests/shared.test.mjs"] });
-  assert.deepEqual(plan(r, "t-new").held[0].in_flight, ["t-fly: both edit tests/shared.test.mjs"]);
+  const p = plan(r, "t-fly", "t-new");
+  assert.deepEqual(p.groups, [["t-fly", "t-new"]]);
+  assert.deepEqual(p.held, []);
+  assert.deepEqual(p.conflicts, []);
+});
+
+test("plan: two tickets sharing docs/ATLAS.md are one group (merge-friendly default)", () => {
+  const r = mk();
+  ticket(r, "a-one", { scope: ["docs/ATLAS.md", "src/a.mjs"] });
+  ticket(r, "b-one", { scope: ["docs/ATLAS.md", "src/b.mjs"] });
+  const p = plan(r, "a-one", "b-one");
+  assert.deepEqual(p.groups, [["a-one", "b-one"]]);
+  assert.deepEqual(p.conflicts, []);
+  assert.deepEqual(p.held, []);
+});
+
+test("plan: docs/ATLAS.md shared with an in-flight ticket is not held", () => {
+  const r = mk();
+  ticket(r, "fly-one", { scope: ["docs/ATLAS.md", "src/a.mjs"], stage: "working" });
+  ticket(r, "new-one", { scope: ["docs/ATLAS.md", "src/b.mjs"] });
+  const p = plan(r, "new-one");
+  assert.deepEqual(p.groups, [["new-one"]]);
+  assert.deepEqual(p.held, []);
+});
+
+test("plan: docs/ATLAS.md shared with an older queued EGM-cleared ticket is not held (queue priority)", () => {
+  const r = mk();
+  ticket(r, "old-q", { scope: ["docs/ATLAS.md", "src/a.mjs"], created: ago(5), egm: "approved" });
+  ticket(r, "new-q", { scope: ["docs/ATLAS.md", "src/b.mjs"], created: ago(1), egm: "waived" });
+  const p = plan(r, "new-q");
+  assert.deepEqual(p.groups, [["new-q"]]);
+  assert.deepEqual(p.held, []);
+  assert.deepEqual(plan(r, "old-q").groups, [["old-q"]]);
+});
+
+test("plan: merge_friendly: [] turns the default off — docs/ATLAS.md conflicts", () => {
+  const r = mk({ merge_friendly: [] });
+  ticket(r, "a-one", { scope: ["docs/ATLAS.md", "src/a.mjs"] });
+  ticket(r, "b-one", { scope: ["docs/ATLAS.md", "src/b.mjs"] });
+  const p = plan(r, "a-one", "b-one");
+  assert.deepEqual(p.groups, [["a-one"], ["b-one"]]);
+  assert.equal(p.conflicts[0].why, "shared file docs/atlas.md");
+});
+
+test("plan: docs/** in one scope still conflicts with docs/ATLAS.md in the other", () => {
+  const r = mk();
+  ticket(r, "a-one", { scope: ["docs/**"] });
+  ticket(r, "b-one", { scope: ["docs/ATLAS.md", "src/b.mjs"] });
+  const p = plan(r, "a-one", "b-one");
+  assert.deepEqual(p.groups, [["a-one"], ["b-one"]]);
+  assert.equal(p.conflicts[0].why, "shared file docs/** ~ docs/atlas.md");
+});
+
+test("plan: custom merge_friendly: CHANGELOG.md ignored, docs/ATLAS.md still conflicts", () => {
+  const r = mk({ merge_friendly: ["CHANGELOG.md"] });
+  ticket(r, "a-one", { scope: ["CHANGELOG.md", "src/a.mjs"] });
+  ticket(r, "b-one", { scope: ["CHANGELOG.md", "src/b.mjs"] });
+  ticket(r, "c-one", { scope: ["docs/ATLAS.md", "src/c.mjs"] });
+  ticket(r, "d-one", { scope: ["docs/ATLAS.md", "src/d.mjs"] });
+  const p = plan(r, "a-one", "b-one", "c-one", "d-one");
+  const together = (x, y) => p.groups.some((g) => g.includes(x) && g.includes(y));
+  assert.ok(together("a-one", "b-one"), "CHANGELOG.md is merge-friendly");
+  assert.ok(!together("c-one", "d-one"), "docs/ATLAS.md still serialises");
+  assert.equal(p.conflicts.find((c) => c.a === "c-one" && c.b === "d-one")?.why, "shared file docs/atlas.md");
+});
+
+test("plan: merge_friendly must be an array of exact file paths", () => {
+  let r = mk({ merge_friendly: "docs/ATLAS.md" });
+  ticket(r, "a-one", { scope: ["a.mjs"] });
+  let res = run(r, "plan", "a-one");
+  assert.equal(res.status, 2, res.stderr);
+  assert.match(res.stderr, /adapter\.json: merge_friendly must be an array of exact file paths/);
+  r = mk({ merge_friendly: ["docs/*.md"] });
+  ticket(r, "a-one", { scope: ["a.mjs"] });
+  res = run(r, "plan", "a-one");
+  assert.equal(res.status, 2, res.stderr);
+  assert.match(res.stderr, /adapter\.json: merge_friendly must be an array of exact file paths/);
+});
+
+test("plan: edit-vs-read on docs/ATLAS.md still conflicts", () => {
+  const r = mk();
+  ticket(r, "x-one", { scope: ["docs/ATLAS.md", "src/x.mjs"] });
+  ticket(r, "y-one", { scope: ["src/y.mjs"], callers: ["`readAtlas()` in docs/ATLAS.md"] });
+  const p = plan(r, "x-one", "y-one");
+  assert.equal(p.conflicts[0].why, "x-one edits docs/atlas.md, which y-one calls");
 });
 
 const NOW = Date.now();
