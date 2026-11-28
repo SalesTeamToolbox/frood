@@ -285,10 +285,18 @@ class PlanError:
 
 
 def _nvidia_fallback_for(tables: RouteTables, model_id: str) -> Candidate | None:
-    """The Nvidia candidate for a Go id, or None when there is none."""
+    """The Nvidia candidate for a Go id, or None when there is none.
+
+    An empty fallback map means no fallback is configured at all
+    (``GATEWAY_GO_FALLBACK=`` opts out); the first-Nvidia-id default applies
+    only when a map is configured but has no entry for this id.
+    """
     if not tables.nvidia_key:
         return None
-    upstream = tables.fallback.get(model_id)
+    fallback = tables.fallback if isinstance(tables.fallback, dict) else {}
+    if not fallback:
+        return None
+    upstream = fallback.get(model_id)
     if upstream is None and tables.nvidia:
         upstream = next(iter(tables.nvidia.values()))
     if upstream is None:
@@ -319,9 +327,11 @@ def plan_route(
         )
     go_table = tables.go if isinstance(tables.go, dict) else {}
     nvidia_table = tables.nvidia if isinstance(tables.nvidia, dict) else {}
-    # A non-str key counts as empty (e.g. a mocked settings object).
+    # A non-str key counts as empty (e.g. a mocked settings object); same for
+    # a non-dict fallback map.
     key = tables.nvidia_key if isinstance(tables.nvidia_key, str) else ""
-    keyed = RouteTables(go=go_table, nvidia=nvidia_table, fallback=tables.fallback, nvidia_key=key)
+    fallback_map = tables.fallback if isinstance(tables.fallback, dict) else {}
+    keyed = RouteTables(go=go_table, nvidia=nvidia_table, fallback=fallback_map, nvidia_key=key)
     if model_id in go_table:
         if go_state == "over":
             fallback = _nvidia_fallback_for(keyed, model_id)
@@ -1005,9 +1015,10 @@ def build_gateway_router(
                 )
             if kind == "response":
                 return _with_route(first, provider, candidate_upstream)  # type: ignore[return-value]
-            logger.info("gateway fallback provider=%s status=%s", provider, first)
-            if not pending:
-                return _with_route(second, provider, candidate_upstream)  # type: ignore[return-value]
+            if pending:
+                logger.info("gateway fallback provider=%s status=%s", provider, first)
+                continue
+            return _with_route(second, provider, candidate_upstream)  # type: ignore[return-value]
         return error_response(503, "api_error", "gateway: no route available")
 
     @router.post("/v1/messages/count_tokens")

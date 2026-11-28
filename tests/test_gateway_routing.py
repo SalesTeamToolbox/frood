@@ -67,11 +67,13 @@ def _settings(**overrides) -> Settings:
     return Settings(**kw)
 
 
-def _client_for(monkeypatch, settings_obj, handler, go_key=GO_KEY, usage_path=None):
+def _client_for(monkeypatch, settings_obj, handler, go_key=GO_KEY, usage_path=None, db_path=None):
     """create_app TestClient with a host-dispatching mock upstream.
 
     ``usage_path`` pins the pace snapshot; when None a missing temp path is
     used so the pace guard reads "unknown" (allowed) deterministically.
+    ``db_path`` pins the Go-key sqlite lookup; when None the real XDG default
+    applies (pass a missing path to force "no Go key" deterministically).
     """
     monkeypatch.setattr("dashboard.server.settings", settings_obj)
     if usage_path is None:
@@ -95,7 +97,10 @@ def _client_for(monkeypatch, settings_obj, handler, go_key=GO_KEY, usage_path=No
         monkeypatch.delenv("OPENCODE_GO_KEY", raising=False)
     else:
         monkeypatch.setenv("OPENCODE_GO_KEY", go_key)
-    monkeypatch.delenv("OPENCODE_DB", raising=False)
+    if db_path is None:
+        monkeypatch.delenv("OPENCODE_DB", raising=False)
+    else:
+        monkeypatch.setenv("OPENCODE_DB", str(db_path))
     gw_module._go_key_cache.clear()
     gw_module._go_state_cache.clear()
     gw_module._crit_logged_hosts.clear()
@@ -348,6 +353,26 @@ def test_plan_over_no_fallback_429():
     tables = _tables(nvidia_key="")
     candidates, error = plan_route("kimi-k3", tables, "over")
     assert candidates == [] and error is not None and error.status == 429
+
+
+def test_plan_empty_fallback_map_means_no_fallback():
+    """GW-T3-01o: GATEWAY_GO_FALLBACK= opts out even with Nvidia ids routed."""
+    tables = _tables(fallback={})
+    candidates, error = plan_route("kimi-k3", tables, "ok")
+    assert error is None
+    assert candidates == [("go", "kimi-k3")]
+    candidates, error = plan_route("kimi-k3", tables, "over")
+    assert candidates == []
+    assert error is not None and error.status == 429
+    assert error.headers.get("x-should-retry") == "false"
+
+
+def test_plan_unmapped_id_uses_first_nvidia_when_map_set():
+    """GW-T3-01p: a non-empty map without this id still uses the first Nvidia id."""
+    tables = _tables(fallback={"other": QWEN_UPSTREAM})
+    candidates, error = plan_route("kimi-k3", tables, "ok")
+    assert error is None
+    assert candidates == [("go", "kimi-k3"), ("nvidia", NV_UPSTREAM)]
 
 
 def test_plan_go_wins_when_in_both_tables():
@@ -693,6 +718,89 @@ def test_fallback_go_400_no_fallback(monkeypatch, tmp_path):
     assert resp.status_code == 400
     assert resp.json()["error"]["type"] == "invalid_request_error"
     assert seen_nv == []
+
+
+def test_missing_go_key_serves_nvidia_when_mapped(monkeypatch, tmp_path):
+    """GW-T3-05d: no Go key drops the Go candidate; mapped Nvidia serves."""
+    go_seen: list[httpx.Request] = []
+
+    def go_handler(request: httpx.Request) -> httpx.Response:
+        go_seen.append(request)
+        raise AssertionError("Go must not be called with no Go key")
+
+    client = _client_for(
+        monkeypatch,
+        _settings(),
+        _split_handler(go_handler, _nvidia_stream_handler([])),
+        go_key=None,
+        db_path=str(tmp_path / "no-such.db"),
+        usage_path=str(tmp_path / "missing.jsonl"),
+    )
+    resp = client.post(
+        "/gw/v1/messages", json=_msg_body(model="kimi-k3", stream=True), headers=AUTH
+    )
+    assert resp.status_code == 200
+    assert resp.headers["x-frood-route"] == f"nvidia:{NV_UPSTREAM}"
+    assert "event: message_start" in resp.text
+    assert go_seen == []
+
+
+def test_fallback_go_error_body_unreadable(monkeypatch, tmp_path, caplog):
+    """GW-T3-05e: a failing error-body read falls back to Nvidia."""
+    go_seen: list[httpx.Request] = []
+    nv_seen: list[httpx.Request] = []
+
+    async def _boom():
+        raise httpx.ReadError("unreadable")
+        yield b""  # pragma: no cover - makes this an async generator
+
+    def go_handler(request: httpx.Request) -> httpx.Response:
+        go_seen.append(request)
+        return httpx.Response(
+            429,
+            headers={"content-type": "application/json"},
+            content=_boom(),
+        )
+
+    client = _client_for(
+        monkeypatch,
+        _settings(),
+        _split_handler(go_handler, _nvidia_stream_handler(nv_seen)),
+        usage_path=str(tmp_path / "missing.jsonl"),
+    )
+    with caplog.at_level(logging.INFO, logger="frood.gateway"):
+        resp = client.post(
+            "/gw/v1/messages", json=_msg_body(model="kimi-k3", stream=True), headers=AUTH
+        )
+    assert resp.status_code == 200
+    assert resp.headers["x-frood-route"] == f"nvidia:{NV_UPSTREAM}"
+    assert len(go_seen) == 1
+    assert len(nv_seen) == 1
+    fallbacks = [r for r in caplog.records if "gateway fallback" in r.getMessage()]
+    assert len(fallbacks) == 1
+    assert "provider=go" in fallbacks[0].getMessage()
+    assert "status=read-error" in fallbacks[0].getMessage()
+
+
+def test_pace_over_empty_fallback_map_429(monkeypatch, tmp_path):
+    """GW-T3-06c: pace over with GATEWAY_GO_FALLBACK= => 429, upstream untouched."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        raise AssertionError("no upstream may be called")
+
+    client = _client_for(
+        monkeypatch,
+        _settings(gateway_go_fallback=""),
+        handler,
+        usage_path=_write_snapshot(tmp_path, weekly=_window(pct=95)),
+    )
+    resp = client.post("/gw/v1/messages", json=_msg_body(model="kimi-k3"), headers=AUTH)
+    assert resp.status_code == 429
+    assert resp.json()["error"]["type"] == "rate_limit_error"
+    assert resp.headers["x-should-retry"] == "false"
+    assert seen == []
 
 
 # -- bar 6: pace over -----------------------------------------------------------
