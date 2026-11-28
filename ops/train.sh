@@ -237,11 +237,20 @@ done <<< "$tests_list"
 # group, so the test process itself dies and none outlives train.sh.
 child_pid=""
 
+# suite_lock_in_play: set to 1 once we enter the acquire path (we have a queue
+# ticket and/or the lock itself). The EXIT/TERM/INT traps then call
+# suite_lock_release unconditionally: it guards on SUITE_LOCK_HELD internally,
+# so after acquire it releases held/, and mid-acquire (SUITE_LOCK_HELD still 0)
+# it removes the leftover queue ticket. Never call it when we never touched
+# the lock (SUITE_LOCK_HELD skipped, or no lib loaded).
+suite_lock_in_play=0
+
 # Release the suite lock exactly once: only when we are the ones who acquired
 # it (suite_lock_release also guards on SUITE_LOCK_HELD internally).
 release_our_lock() {
-  if [ "$suite_lock_held" = "1" ]; then
+  if [ "$suite_lock_in_play" = "1" ]; then
     suite_lock_release
+    suite_lock_in_play=0
     suite_lock_held=0
   fi
 }
@@ -285,6 +294,7 @@ if [ -n "$suite_lock_lib" ]; then
     # The caller already holds the lock: skip acquire and release entirely.
     suite_lock_line="skipped (FROOD_SUITE_LOCK_HELD)"
   else
+    suite_lock_in_play=1
     lock_start="$(date +%s)"
     if suite_lock_acquire "frood train $ticket ($repo_root)"; then
       lock_end="$(date +%s)"
@@ -304,7 +314,7 @@ if [ -n "$suite_lock_lib" ]; then
       lock_rc=$?
       write_receipt "test failure" 1 "$tests_receipt_lines
 suite_lock_wait_s: 0
-suite_lock: unavailable (rc $lock_rc)
+suite_lock: unlocked
 detail: suite lock unavailable (rc $lock_rc)"
       echo "train: suite lock unavailable (rc $lock_rc)" >&2
       exit 1
@@ -325,11 +335,11 @@ run_test_file() {
   set -m
   case "$f" in
     *.py)
-      timeout -k 10 "$TRAIN_PYTEST_TIMEOUT" "$PYTEST_PYTHON" -m pytest "$f" -q >>"$pytest_log" 2>&1 &
+      timeout -k 10 "$TRAIN_PYTEST_TIMEOUT" "$PYTEST_PYTHON" -m pytest "$f" -q >>"$pytest_log" 2>&1 < /dev/null &
       child_pid=$!
       ;;
     *.test.mjs|*.test.js)
-      timeout -k 10 "$TRAIN_NODE_TIMEOUT" node --test "$f" >>"$node_test_log" 2>&1 &
+      timeout -k 10 "$TRAIN_NODE_TIMEOUT" node --test "$f" >>"$node_test_log" 2>&1 < /dev/null &
       child_pid=$!
       ;;
   esac

@@ -691,8 +691,16 @@ class TestSuiteLock:
 
         train_thread = threading.Thread(target=run_train_in_thread)
         train_thread.start()
-        # Let the train wait behind the live holder for about 2 s, then
-        # release the holder so the train can acquire the lock.
+        # Poll until the train has queued (a ticket file appears), then give
+        # it ~2 s behind the live holder before releasing the holder. Polling
+        # keeps the test deterministic under load instead of sleeping blindly.
+        queued = False
+        for _ in range(100):
+            if any(slroot.glob("queue/*")):
+                queued = True
+                break
+            time.sleep(0.05)
+        assert queued, "train never queued behind the live holder"
         time.sleep(2.0)
         stop.set()
         beater.join(timeout=5)
@@ -851,3 +859,71 @@ class TestSuiteLock:
         assert dead, f"node child pid {pid} still alive after train.sh returned"
         # The lock must be released.
         assert not (slroot / "held").exists(), "held/ still present after SIGTERM"
+
+    # (h) SIGTERM mid-wait (held/ live): exits 143 and leaves queue/ empty so
+    # it cannot block every suite on the box for the stale window.
+    def test_sigterm_mid_wait_empties_queue(self, tmp_path):
+        ticket = "py-ticket"
+        bin_dir = tmp_path / "bin"
+        make_stub_ruff(bin_dir)
+        reports_root = tmp_path / "reports"
+        slroot = tmp_path / "slroot"
+        repo = make_fixture(
+            tmp_path,
+            ticket,
+            tracked_files={"tests/test_py-ticket.py": PASS_PY},
+            copy_lock_lib=True,
+        )
+        # Fake live holder beats held/owner forever.
+        held = slroot / "held"
+        held.mkdir(parents=True)
+        (held / "owner").write_text(
+            "train: fake live holder\npid 999, since now\ntoken fake-token\n"
+        )
+
+        stop = threading.Event()
+
+        def beat():
+            while not stop.is_set():
+                try:
+                    os.utime(held / "owner", None)
+                except FileNotFoundError:
+                    return
+                time.sleep(0.2)
+
+        beater = threading.Thread(target=beat, daemon=True)
+        beater.start()
+        try:
+            env = {
+                "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
+                "FROOD_REPORTS_ROOT": str(reports_root),
+                "SUITE_LOCK_ROOT": str(slroot),
+                "SUITE_LOCK_POLL": "1",
+                "SUITE_LOCK_STALE": "5",
+            }
+            proc = subprocess.Popen(
+                ["bash", "ops/train.sh", ticket],
+                cwd=repo,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            # Wait until the train has queued (a ticket file appears).
+            queued = False
+            for _ in range(100):
+                if any(slroot.glob("queue/*")):
+                    queued = True
+                    break
+                time.sleep(0.05)
+            assert queued, "train never queued behind the live holder"
+            proc.terminate()  # SIGTERM mid-wait
+            rc = proc.wait(timeout=30)
+            assert rc == 143, f"expected exit 143 mid-wait, got {rc}: {proc.stderr}"
+        finally:
+            stop.set()
+            beater.join(timeout=5)
+            shutil.rmtree(held, ignore_errors=True)
+        # No queue ticket may be left behind.
+        assert not any(slroot.glob("queue/*")), "queue ticket left behind after mid-wait SIGTERM"
+        assert not (slroot / "held").exists(), "held/ still present after mid-wait SIGTERM"
