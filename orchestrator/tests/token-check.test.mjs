@@ -640,3 +640,85 @@ test("F6: replaced frontmatter description moves A.removed and A.added", () => {
   assert.equal(res.surfaces.A.added > 0, true, `A.added should be > 0, got ${res.surfaces.A.added}`);
   assert.ok(res.summary.line.includes("A "), `summary should mention A: ${res.summary.line}`);
 });
+
+// ---------------- F1: URL-pattern span check + payload spread above ----------------
+
+test("F1: payload spread above URL + json=<ident> → tradeoff (not WASTE)", () => {
+  const diff = `diff --git a/core/gateway.py b/core/gateway.py\n@@ -0,0 +1,4 @@\n+payload = {"model": m, **kwargs}\n+url = f"{b}/chat/completions"\n+await client.post(url, headers=h, json=payload)\n+print("ok")\n`;
+  const files = { "core/gateway.py": "payload = {\"model\": m, **kwargs}\nurl = f\"{b}/chat/completions\"\nawait client.post(url, headers=h, json=payload)\nprint(\"ok\")\n" };
+  const res = runScanDiff(diff, files);
+  const hits = res.findings.filter((f) => f.rule === "C-no-cap");
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].tag, "tradeoff");
+  assert.equal(hits[0].issue, "call site without output cap, cap forwarded from callers");
+});
+
+test("F1: url line then client.build_request(json=body) → tradeoff", () => {
+  const diff = `diff --git a/core/gateway.py b/core/gateway.py\n@@ -0,0 +1,2 @@\n+url = base + "/chat/completions"\n+r = client.build_request("POST", url, json=body)\n`;
+  const files = { "core/gateway.py": 'url = base + "/chat/completions"\nr = client.build_request("POST", url, json=body)\n' };
+  const res = runScanDiff(diff, files);
+  const hits = res.findings.filter((f) => f.rule === "C-no-cap");
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].tag, "tradeoff");
+  assert.equal(hits[0].issue, "body forwarded from caller — cap not verified");
+});
+
+test("F1: URL site with no spread and no forwarded body → WASTE", () => {
+  const diff = `diff --git a/core/gateway.py b/core/gateway.py\n@@ -0,0 +1,2 @@\n+url = "/v1/messages"\n+client.post(url)\n`;
+  const files = { "core/gateway.py": 'url = "/v1/messages"\nclient.post(url)\n' };
+  const res = runScanDiff(diff, files);
+  const hits = res.findings.filter((f) => f.rule === "C-no-cap");
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].tag, "WASTE");
+});
+
+// ---------------- F2: computeLineStates inside-at-start or any triple quote ----------------
+
+test("F2: one-line docstring with /chat/completions → not C", () => {
+  const cfg = loadConfig("/");
+  const lines = ['    """POST /chat/completions validates JSON body."""', "client.post(x)"];
+  assert.equal(classify("core/gateway.py", 1, lines, cfg), null);
+});
+
+test("F2: closing line of multi-line docstring with messages.create → not C", () => {
+  const cfg = loadConfig("/");
+  const lines = ['    """docstring opener', 'see messages.create here"""', "real = chat.completions.create()"];
+  assert.equal(classify("core/gateway.py", 2, lines, cfg), null);
+});
+
+// ---------------- F3: triple-quote only .py, block comment only JS/TS ----------------
+
+test("F3: .py glob string before real call → later call IS a C site", () => {
+  const diff = `diff --git a/core/bridge.py b/core/bridge.py\n@@ -0,0 +1,2 @@\n+models = "meta/*, qwen/*"\n+resp = client.chat.completions.create()\n`;
+  const files = { "core/bridge.py": 'models = "meta/*, qwen/*"\nresp = client.chat.completions.create()\n' };
+  const res = runScanDiff(diff, files);
+  assert.equal(res.surfaces.C.sites, 1, `expected 1 C site, got ${res.surfaces.C.sites}`);
+});
+
+// ---------------- F4: deleted .py removed call site counted in C removed ----------------
+
+test("F4: deleted .py removed call site → C removed", () => {
+  const diff = `diff --git a/deleted.py b/deleted.py\ndeleted file mode 100644\n--- a/deleted.py\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-response = chat.completions.create(model="x")\n-print("done")\n`;
+  const entries = parseDiff(diff);
+  const files = new Map();
+  const cfg = loadConfig("/");
+  const res = scanDiff(entries, files, cfg);
+  assert.equal(res.surfaces.C.removed > 0, true, `C.removed should be > 0, got ${res.surfaces.C.removed}`);
+});
+
+// ---------------- F5: test_paths skip C rules ----------------
+
+test("F5: tests/test_x.py call site with no cap → no C finding", () => {
+  const diff = `diff --git a/tests/test_x.py b/tests/test_x.py\n@@ -0,0 +1 @@\n+response = chat.completions.create(model="x")\n`;
+  const files = { "tests/test_x.py": "response = chat.completions.create(model=\"x\")\n" };
+  const res = runScanDiff(diff, files);
+  assert.equal(res.surfaces.C.sites, 0, `expected 0 C sites, got ${res.surfaces.C.sites}`);
+  assert.equal(res.findings.filter((f) => f.rule === "C-no-cap").length, 0);
+});
+
+test("F5: non-test .py call site still → C site (control)", () => {
+  const diff = `diff --git a/core/real.py b/core/real.py\n@@ -0,0 +1 @@\n+response = chat.completions.create(model="x")\n`;
+  const files = { "core/real.py": "response = chat.completions.create(model=\"x\")\n" };
+  const res = runScanDiff(diff, files);
+  assert.equal(res.surfaces.C.sites, 1, `expected 1 C site, got ${res.surfaces.C.sites}`);
+});

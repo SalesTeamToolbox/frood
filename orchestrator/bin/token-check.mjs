@@ -48,11 +48,18 @@ export const DEFAULTS = {
     "/chat/completions",
   ],
   budgets: { always_loaded_tokens: 300, on_demand_tokens: 1500 },
+  test_paths: [
+    "**/tests/**",
+    "**/test_*.py",
+    "**/*_test.py",
+    "**/*.test.*",
+    "**/*.spec.*",
+  ],
 };
 
 // URL call patterns (F2): only treated as call sites when a request call
 // appears on the same line or within the next 10 lines.
-const URL_REQUEST_RE = /\.post\(|\.request\(|\.stream\(|fetch\(|requests\.|httpx\.|aiohttp/;
+const URL_REQUEST_RE = /\.post\(|\.request\(|\.build_request\(|\.stream\(|fetch\(|requests\.|httpx\.|aiohttp/;
 
 // ---------------------------------------------------------------------------
 // Rules (exported RULES, five in T1)
@@ -95,6 +102,8 @@ export const RULES = [
 ];
 
 const CALL_EXT_RE = /\.(py|js|mjs|cjs|ts|tsx)$/;
+// F1: URL-pattern call patterns — only a call site when a request call is nearby.
+const URL_PATTERN_RE = /\/v1\/messages|\/chat\/completions/;
 const PREMIUM_RE = /(opus|fable|gpt-5(?!-mini)|\bo3\b(?!-mini)|gemini-[\w.-]*-pro)/i;
 const CAP_KEYWORDS = ["max_tokens", "max_output_tokens", "maxTokens", "max_completion_tokens"];
 const SPREAD_RE = /\*\*kwargs|\*\*params|\.\.\.opts/;
@@ -138,22 +147,34 @@ function isDecoratorLine(line) {
 }
 
 // Cache of per-line states keyed by the lines array reference, so classify()
-// (called once per line by scanDiff) computes string/block-comment state once
-// per file instead of once per line (F1).
+// (called once per line in tests/fallbacks) computes string/block-comment
+// state once per file instead of once per line (F1).
 const classifyStates = new WeakMap();
-function getClassifyStates(lines) {
+function getClassifyStates(lines, p) {
   let states = classifyStates.get(lines);
-  if (!states) { states = computeLineStates(lines); classifyStates.set(lines, states); }
+  if (!states) { states = computeLineStates(lines, { isPyFile: isPy(p), isJsTsFile: isJsTs(p) }); classifyStates.set(lines, states); }
   return states;
 }
 
+// F3: file-type flags for state tracking. Triple-quoted strings ("""/''') are
+// Python-only; block comments (/* */) are JS/TS-only.
+function isPy(p) {
+  return p.endsWith(".py");
+}
+function isJsTs(p) {
+  return /\.(js|mjs|cjs|ts|tsx)$/.test(p);
+}
+
 // ---------------------------------------------------------------------------
-// Per-line state tracking (F2): walk a file's lines once and record, per line,
-// whether it sits inside a Python triple-quoted string ("""/''') or a JS block
-// comment (/* */). A line that opens and closes on itself counts as inside.
+// Per-line state tracking (F2/F3): walk a file's lines once and record, per
+// line, whether it sits inside a Python triple-quoted string or a JS block
+// comment. Triple-quote tracking runs only for .py; block-comment tracking
+// only for .js/.mjs/.cjs/.ts/.tsx. A line counts as "inside" if the state was
+// already inside at its start OR the line contains any triple quote (opens,
+// closes, or both).
 // ---------------------------------------------------------------------------
 
-export function computeLineStates(lines) {
+export function computeLineStates(lines, { isPyFile = false, isJsTsFile = false } = {}) {
   const linesArr = Array.isArray(lines) ? lines : String(lines).split("\n");
   const states = new Array(linesArr.length);
   let inTriple = false; // Python """ or '''
@@ -161,23 +182,26 @@ export function computeLineStates(lines) {
 
   for (let i = 0; i < linesArr.length; i++) {
     const l = linesArr[i];
+    const tripleStart = inTriple; // state at the start of this line
     let triple = inTriple;
     let block = inBlock;
 
-    // Track """ and ''' toggles. Count unescaped occurrences; a line that both
-    // opens and closes counts as inside.
-    for (const q of ['"""', "'''"]) {
-      let idx = l.indexOf(q);
-      let count = 0;
-      while (idx >= 0) {
-        count++;
-        idx = l.indexOf(q, idx + q.length);
+    // Track """ and ''' toggles (Python only). A line that both opens and
+    // closes on itself counts as inside.
+    if (isPyFile) {
+      for (const q of ['"""', "'''"]) {
+        let idx = l.indexOf(q);
+        let count = 0;
+        while (idx >= 0) {
+          count++;
+          idx = l.indexOf(q, idx + q.length);
+        }
+        if (count % 2 === 1) triple = !triple;
       }
-      if (count % 2 === 1) triple = !triple;
     }
 
-    // Track /* */ toggles.
-    {
+    // Track /* */ toggles (JS/TS only).
+    if (isJsTsFile) {
       let idx = l.indexOf("/*");
       let openCount = 0;
       while (idx >= 0) { openCount++; idx = l.indexOf("/*", idx + 2); }
@@ -187,25 +211,32 @@ export function computeLineStates(lines) {
       const net = openCount - closeCount;
       if (net !== 0) block = net > 0 ? true : block;
       if (closeCount > 0 && openCount === 0) block = false;
-      // If both open and close on same line, line is inside (counts as inside).
       if (openCount > 0 && closeCount > 0) block = true;
       if (openCount > 0 && closeCount === 0) block = true;
     }
 
-    states[i] = { inTriple: triple, inBlock: block, inside: triple || block };
+    // F2: inside if inside at line start, or the line contains any triple quote,
+    // or inside a block comment.
+    const lineHasTriple = isPyFile && (l.includes('"""') || l.includes("'''"));
+    states[i] = { inTriple: triple, inBlock: block, inside: tripleStart || lineHasTriple || block };
     inTriple = triple;
     inBlock = block;
   }
   return states;
 }
 
-// Does any of lines[idx..idx+10] contain a request call shape?
-function hasRequestCallNearby(lines, idx) {
+// Returns the index of a request call in lines[idx..idx+10], or -1.
+// F1: for URL-pattern sites this locates the request call whose balanced
+// argument span drives the C-no-cap span check.
+function hasRequestCallIdx(lines, idx) {
   const end = Math.min(lines.length, idx + 11);
   for (let j = idx; j < end; j++) {
-    if (URL_REQUEST_RE.test(lines[j])) return true;
+    if (URL_REQUEST_RE.test(lines[j])) return j;
   }
-  return false;
+  return -1;
+}
+function hasRequestCallNearby(lines, idx) {
+  return hasRequestCallIdx(lines, idx) >= 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -218,11 +249,13 @@ export function classify(path, lineNo, text, cfg) {
   const lines = Array.isArray(text) ? text : String(text).split("\n");
   const idx = lineNo - 1;
   const line = lines[idx] || "";
-  // F2: compute inside-string / block-comment state once per lines array.
-  const states = Array.isArray(text) ? getClassifyStates(lines) : computeLineStates(lines);
+  // F2/F3: compute inside-string / block-comment state once per lines array,
+  // tracking triple-quotes only for .py and block comments only for JS/TS.
+  const states = getClassifyStates(lines, p);
 
   // 1. C — LLM call site (call file + call pattern on this line). First match.
-  if (CALL_EXT_RE.test(p)) {
+  if (CALL_EXT_RE.test(p) && !matchAny(p, cfg.test_paths)) {
+    // F5: C rules skip test files (fall through to A/B/D/null).
     for (const pat of cfg.llm_call_patterns) {
       if (!line.includes(pat)) continue;
       // F2: not a comment, not a decorator, not inside a string/block-comment.
@@ -262,6 +295,7 @@ export function loadConfig(dir) {
     agent_output: [...DEFAULTS.agent_output],
     llm_call_patterns: [...DEFAULTS.llm_call_patterns],
     budgets: { ...DEFAULTS.budgets },
+    test_paths: [...DEFAULTS.test_paths],
   };
 
   const adapterPath = path.join(dir, ".opencode", "board", "adapter.json");
@@ -288,6 +322,7 @@ export function loadConfig(dir) {
     "agent_docs",
     "agent_output",
     "llm_call_patterns",
+    "test_paths",
   ]) {
     const val = tc[key];
     if (Array.isArray(val) && val.every((x) => typeof x === "string")) {
@@ -436,7 +471,8 @@ export function parseDiff(diffText) {
 
 function surfaceFor(p, lineNo, lines, states, cfg) {
   // C first — classify's C logic, honoring inside-string state (F2).
-  if (CALL_EXT_RE.test(p)) {
+  // F5: C rules skip test files (fall through to A/B/D/null).
+  if (CALL_EXT_RE.test(p) && !matchAny(p, cfg.test_paths)) {
     const idx = lineNo - 1;
     const line = lines[idx] || "";
     for (const pat of cfg.llm_call_patterns) {
@@ -503,7 +539,7 @@ export function scanDiff(entries, files, cfg, baseTexts) {
   };
   const getStates = (p, lines) => {
     let states = statesCache.get(p);
-    if (!states) { states = computeLineStates(lines); statesCache.set(p, states); }
+    if (!states) { states = computeLineStates(lines, { isPyFile: isPy(p), isJsTsFile: isJsTs(p) }); statesCache.set(p, states); }
     return states;
   };
 
@@ -517,13 +553,15 @@ export function scanDiff(entries, files, cfg, baseTexts) {
     const postStates = postLines ? getStates(p, postLines) : null;
     const baseText = baseTextsMap.get(p);
     const baseLines = baseText ? String(baseText).split("\n") : null;
-    const baseStates = baseLines ? computeLineStates(baseLines) : null;
+    const baseStates = baseLines ? computeLineStates(baseLines, { isPyFile: isPy(p), isJsTsFile: isJsTs(p) }) : null;
 
     entry.classified = { added: [], removed: [] };
 
     for (const add of entry.added) {
+      // F4: when classifying from a single line's own text (unreadable file),
+      // pass line number 1 with a one-element array.
       const surface = postLines ? surfaceFor(p, add.line, postLines, postStates, cfg)
-        : classify(p, add.line, add.text, cfg);
+        : classify(p, 1, [add.text], cfg);
       const bytes = bytesOf(add.text);
       entry.classified.added.push({ line: add.line, text: add.text, surface, bytes });
       accumulate(surf, surface, bytes, "added", p);
@@ -535,7 +573,8 @@ export function scanDiff(entries, files, cfg, baseTexts) {
       // the old-line number. Fall back to the removed line's own text.
       const remLines = baseLines || [rem.text];
       const remStates = baseStates || null;
-      const ln = rem.oldLine != null ? rem.oldLine : rem.line;
+      // F4: single-line own text → line number 1.
+      const ln = baseLines ? (rem.oldLine != null ? rem.oldLine : rem.line) : 1;
       const surface = surfaceFor(p, ln, remLines, remStates, cfg);
       const bytes = bytesOf(rem.text);
       entry.classified.removed.push({ line: rem.line, text: rem.text, surface, bytes, oldLine: rem.oldLine });
@@ -565,7 +604,7 @@ export function scanDiff(entries, files, cfg, baseTexts) {
   const resultSurfaces = {
     A: { added: surf.A.added, removed: surf.A.removed, tokens: netTokens(surf.A.added, surf.A.removed) },
     B: { added: surf.B.added, removed: surf.B.removed, tokens: netTokens(surf.B.added, surf.B.removed) },
-    C: { sites: surf.C.sites },
+    C: { sites: surf.C.sites, added: surf.C.added, removed: surf.C.removed },
     D: { files: surf.D.files.size },
   };
 
@@ -646,36 +685,72 @@ function runCnoCap(ctx) {
     for (const add of entry.classified.added) {
       if (add.surface !== "C") continue;
 
-      // Enclosing call arguments: from call line to where ( ) { } balance, max 60 lines.
-      let parenDepth = 0, braceDepth = 0, started = false, spread = false, forwardedBody = false;
-      const start = add.line - 1;
-      for (let j = start; j < Math.min(postLines.length, start + 60); j++) {
-        const l = postLines[j];
-        started = true;
-        for (const ch of l) {
-          if (ch === "(") parenDepth++;
-          else if (ch === ")") parenDepth--;
-          else if (ch === "{") braceDepth++;
-          else if (ch === "}") braceDepth--;
+      const urlIdx = add.line - 1;
+      const line = postLines[urlIdx];
+      const isUrlSite = URL_PATTERN_RE.test(line);
+
+      let spread = false, forwardedBody = false;
+
+      if (isUrlSite) {
+        // F1: for URL-pattern sites, start the balanced span at the request call
+        // line (located by hasRequestCallIdx), scanning from the URL line through
+        // the end of that span (max 60 lines from the URL line). Also scan up to
+        // 10 lines above the URL line for a payload built with a spread when the
+        // request passes that payload by identifier.
+        const reqIdx = hasRequestCallIdx(postLines, urlIdx);
+        const aboveStart = Math.max(0, urlIdx - 10);
+        for (let j = aboveStart; j <= urlIdx; j++) {
+          if (SPREAD_RE.test(postLines[j])) { spread = true; break; }
         }
-        if (SPREAD_RE.test(l)) spread = true;
-        if (FORWARDED_BODY_RE.test(l)) forwardedBody = true;
-        if (started && parenDepth === 0 && braceDepth === 0) break;
+        let parenDepth = 0, braceDepth = 0, started = false;
+        const spanEnd = Math.min(postLines.length, urlIdx + 60);
+        const scanStart = reqIdx >= 0 ? reqIdx : urlIdx;
+        for (let j = scanStart; j < spanEnd; j++) {
+          const l = postLines[j];
+          started = true;
+          for (const ch of l) {
+            if (ch === "(") parenDepth++;
+            else if (ch === ")") parenDepth--;
+            else if (ch === "{") braceDepth++;
+            else if (ch === "}") braceDepth--;
+          }
+          if (FORWARDED_BODY_RE.test(l)) forwardedBody = true;
+          if (SPREAD_RE.test(l)) spread = true;
+          if (started && parenDepth === 0 && braceDepth === 0) break;
+        }
+      } else {
+        // Non-URL call site: scan from the call line forward (max 60 lines).
+        let parenDepth = 0, braceDepth = 0, started = false;
+        const start = urlIdx;
+        const spanEnd = Math.min(postLines.length, start + 60);
+        for (let j = start; j < spanEnd; j++) {
+          const l = postLines[j];
+          started = true;
+          for (const ch of l) {
+            if (ch === "(") parenDepth++;
+            else if (ch === ")") parenDepth--;
+            else if (ch === "{") braceDepth++;
+            else if (ch === "}") braceDepth--;
+          }
+          if (SPREAD_RE.test(l)) spread = true;
+          if (FORWARDED_BODY_RE.test(l)) forwardedBody = true;
+          if (started && parenDepth === 0 && braceDepth === 0) break;
+        }
       }
 
-      const tokens = netTokens(bytesOf(add.text), 0);
-      if (forwardedBody) {
+      const tokens = netTokens(bytesOf(line), 0);
+      if (spread) {
         findings.push({
           tag: "tradeoff", rule: "C-no-cap", surface: "C", path: p, line: add.line,
-          issue: "body forwarded from caller — cap not verified",
+          issue: "call site without output cap, cap forwarded from callers",
           try: "cap forwarded from callers — not verified",
           verify: "the cap fits the longest legitimate answer",
           tokens,
         });
-      } else if (spread) {
+      } else if (forwardedBody) {
         findings.push({
           tag: "tradeoff", rule: "C-no-cap", surface: "C", path: p, line: add.line,
-          issue: "call site without output cap, cap forwarded from callers",
+          issue: "body forwarded from caller — cap not verified",
           try: "cap forwarded from callers — not verified",
           verify: "the cap fits the longest legitimate answer",
           tokens,

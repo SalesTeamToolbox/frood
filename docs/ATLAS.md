@@ -553,7 +553,7 @@ trap: reuses orchestrator/bin/pace-read.mjs's single child process (10 s timeout
 ### Token surface check (token-check)
 handler: orchestrator/bin/token-check.mjs (`classify`, `RULES`, `parseDiff`, `scanDiff`, `scan`, `loadConfig`; CLI `[--dir] [--base] [--json] [--all]`)
 decides: the token surface per added line (first match wins: C call site, A always-loaded/frontmatter description, B agent-doc body/mandate, D agent-facing bin output), net token delta per surface (bytes/4), and five rules — only C-no-cap is WASTE, the rest are tradeoff
-trap: advice only — exit 0 with findings, exit 2 only for usage/git failures; glob matching is scope-check.mjs matchAny, which does not cross dot-dirs, so every .claude/ surface is listed in both forms; heuristics are text-based (enclosing-call span, file-wide cap search), not parsed ASTs
+trap: advice only — exit 0 with findings, exit 2 only for usage/git failures; glob matching is scope-check.mjs matchAny, which does not cross dot-dirs, so every .claude/ surface is listed in both forms; heuristics are text-based (enclosing-call span, file-wide cap search), not parsed ASTs; C rules skip adapter `test_paths` (default tests/ and *test* files)
 
 ### Claude reset advisor (cc-pace advise)
 handler: orchestrator/bin/cc-pace.mjs (`adviseState` pure, `effectiveDeadline`, `dueNotifications`, `activeTickets`, `adviseTick`; CLI `advise [--json] [--notify]`, `reset-used full|fable|none`)
