@@ -417,7 +417,7 @@ function runProc(repo, root, ...args) {
   });
 }
 
-test("cap --kind build auto: clear sample -> max from slots max (6), reason present in --json", () => {
+test("cap --kind build auto: clear sample -> max from slots max (10), reason present in --json", () => {
   const repo = mk({ max_parallel: { build: "auto" } });
   const root = procRoot("some avg300=5\n", "0.53 0.83 1.00\n", "MemAvailable: 13500000 kB\n");
   const c = runProc(repo, root, "cap", "--kind", "build", "--json");
@@ -425,13 +425,13 @@ test("cap --kind build auto: clear sample -> max from slots max (6), reason pres
   const s = JSON.parse(c.stdout);
   assert.equal(s.kind, "build");
   assert.equal(s.running, 0);
-  assert.equal(s.max, 6);
+  assert.equal(s.max, 10);
   assert.equal(s.ok, true);
   assert.ok(s.reason, "reason present in auto mode");
-  assert.match(s.reason, /^slots 6\/6 \(cpu wait 5%, load 0\.83, 13 GiB free\) \(advisory\)$/);
+  assert.match(s.reason, /^slots 10\/10 \(cpu wait 5%, load 0\.83, 13 GiB free\) \(advisory\)$/);
   const text = runProc(repo, root, "cap", "--kind", "build");
   assert.equal(text.status, 0, text.stderr);
-  assert.match(text.stdout, /^ok build 0\/6/);
+  assert.match(text.stdout, /^ok build 0\/10/);
 });
 
 test("cap --kind build auto: busy sample -> max falls to slots min (2), reason says so", () => {

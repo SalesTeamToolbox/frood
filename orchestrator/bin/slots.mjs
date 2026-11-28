@@ -88,7 +88,7 @@ export function slotConfig(env, cliSlots) {
   const raw = env.WORKER_SLOTS;
   if (raw === undefined || raw === "") {
     const min = posInt("WORKER_SLOTS_MIN", String(env.WORKER_SLOTS_MIN ?? 2));
-    const max = posInt("WORKER_SLOTS_MAX", String(env.WORKER_SLOTS_MAX ?? 6));
+    const max = posInt("WORKER_SLOTS_MAX", String(env.WORKER_SLOTS_MAX ?? 10));
     if (min > max) throw new Error(`invalid WORKER_SLOTS_MIN/MAX: min ${min} > max ${max}`);
     return { mode: "dynamic", min, max };
   }
@@ -172,6 +172,33 @@ function writeJsonAtomic(file, obj) {
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(obj));
   fs.renameSync(tmp, file);
+}
+
+// Machine-wide clear-since hysteresis shared between every oc-worker process:
+// <slotDir>/clear-state.json holds { clearSince } so one process's not-clear
+// sample resets everyone's cold-start timer. tmp + rename, like writeJsonAtomic.
+// Unreadable / missing / garbage -> { clearSince: null }; write failures are
+// swallowed -- they never change admission.
+const CLEAR_STATE_FILE = "clear-state.json";
+
+export function readClearState(dir) {
+  try {
+    const st = JSON.parse(fs.readFileSync(path.join(dir, CLEAR_STATE_FILE), "utf8"));
+    if (st && typeof st === "object" && !Array.isArray(st) && (st.clearSince === null || Number.isFinite(st.clearSince))) {
+      return { clearSince: st.clearSince };
+    }
+  } catch {} // missing, unreadable or garbage -> null
+  return { clearSince: null };
+}
+
+export function writeClearState(dir, state) {
+  try {
+    const file = path.join(dir, CLEAR_STATE_FILE);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(state));
+    fs.renameSync(tmp, file);
+  } catch {} // never change admission on a write failure
 }
 
 export function readNvidiaState(dir) {

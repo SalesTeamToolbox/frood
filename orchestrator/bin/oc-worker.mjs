@@ -24,11 +24,12 @@
 //   the provider's retry-after) and the next agent in the list runs; later runs skip known-down models
 //   without calling them. Max 3 real attempts. The receipt records every hop and skip.
 // - Machine-wide worker slot cap: `WORKER_SLOTS=N` (or --slots N) is a fixed cap of N. When unset, the cap is
-//   dynamic between WORKER_SLOTS_MIN (default 2) and WORKER_SLOTS_MAX (default 6), decided from machine load over
+//   dynamic between WORKER_SLOTS_MIN (default 2) and WORKER_SLOTS_MAX (default 10), decided from machine load over
 //   the last 5 minutes (/proc/pressure/cpu some avg300, /proc/loadavg, /proc/meminfo MemAvailable); ORCH_PROC_ROOT
 //   overrides the proc tree (tests use temp fixtures, never the real /proc). Invalid values exit 2. Slots are lock
-//   dirs under ~/.config/orchestrator/slots, stale when the owning pid is gone. Decisions are logged to
-//   ~/.config/orchestrator/slot-decisions.log (on admission and on allowed changes only).
+//   dirs under ~/.config/orchestrator/slots, stale when the owning pid is gone; the shared clear-state.json next to
+//   them holds machine-wide clear-since hysteresis so one process's not-clear resets everyone. Decisions are logged
+//   to ~/.config/orchestrator/slot-decisions.log (on admission and on allowed changes only).
 // - Machine-wide Nvidia provider slot: a run whose model starts with `nvidia/` first claims one of the lock dirs
 //   `provider-nvidia-<i>` beside the worker slots, then a machine slot. One API key means one 429 budget, so Nvidia
 //   runs are capped across every ticket and role. The cap is adaptive: NVIDIA_SLOTS_MAX (default 3) with no recent
@@ -177,7 +178,7 @@ import { appendEvent, atomicWrite, streamsDir } from "./handoff.mjs";
 import { workerOutcome } from "./outcome.mjs";
 import { CHAINS, chainFor } from "./chains.mjs";
 import { readPace, paceChain, ccPaceRecord, PACE_POLICY } from "./pace-read.mjs";
-import { readSample, slotConfig, allowedSlots, decisionLog, heldCount, nvidiaCapNow, recordNvidia429 } from "./slots.mjs";
+import { readSample, slotConfig, allowedSlots, decisionLog, heldCount, readClearState, writeClearState, nvidiaCapNow, recordNvidia429 } from "./slots.mjs";
 import { allowedRoots, findMain, gitStatusZ, parseStatusZ, footer, mergeEditFence, foldEscapes, finalizeEscapes, hasCompletedWrite } from "./worktree-fence.mjs";
 
 export const FOOTER = `
@@ -657,7 +658,12 @@ export async function acquireSlot(nOrCfg, { pollMs = 3000, deadline = Infinity, 
   fs.mkdirSync(slotDir(), { recursive: true });
   const isDynamic = typeof nOrCfg === "object" && nOrCfg !== null && nOrCfg.mode;
   const cfg = isDynamic ? (injectedCfg || nOrCfg) : { mode: "fixed", n: nOrCfg };
+  // The shared clear-state file holds machine-wide hysteresis: one process's not-clear
+  // resets everyone's cold-start timer. When `state` is injected (tests) the file is
+  // never touched; otherwise seed from it and re-read it each poll.
+  const shared = !injectedState && cfg.mode === "dynamic";
   let state = injectedState || { clearSince: null };
+  if (shared) state = readClearState(slotDir());
   let lastAllowed = null;
   let waitedSince = null; // ms when this run started waiting (null = not waiting right now)
   let claimedDir = null;
@@ -665,18 +671,23 @@ export async function acquireSlot(nOrCfg, { pollMs = 3000, deadline = Infinity, 
     const now = injectedNow !== undefined ? injectedNow : Date.now();
     let sample;
     if (isDynamic) {
+      if (shared) state = readClearState(slotDir()); // re-read the shared file each poll
       if (typeof injectedSample === "function") sample = injectedSample();
       else sample = injectedSample !== undefined ? injectedSample : readSample();
     }
+    const prevClearSince = state.clearSince;
     const { allowed, max, reason, state: newState } = allowedSlots(sample, cfg, state, now);
     state = newState;
+    if (shared && state.clearSince !== prevClearSince) {
+      writeClearState(slotDir(), state); // write failures swallowed — never changes admission
+    }
     if (allowed !== lastAllowed) {
       decisionLog({ allowed, held: heldCount(), sample, reason });
       lastAllowed = allowed;
     }
     for (let i = 1; i <= allowed; i++) {
       const d = path.join(slotDir(), `slot-${i}`);
-      if (isDynamic && i > cfg.min && !burstGuardOk(now)) continue; // above the floor: one admission per 60 s
+      if (isDynamic && i > cfg.min && !burstGuardOk(now)) continue; // above the floor: one admission per 20 s (burst guard)
       try {
         fs.mkdirSync(d);
         fs.writeFileSync(path.join(d, "owner"), JSON.stringify({ pid, agent, title, out, since: new Date().toISOString() }));
@@ -815,8 +826,10 @@ export async function acquireProviderSlot(provider, capOrFn, { pollMs = 3000, de
 }
 
 // Short box-wide lock around an above-floor admission: while a lock dir is held (or younger than 30 s)
-// another admission is in progress; if any live slot was claimed within the last 60 s, deny this one.
-// Slots 1..min are claimed without the guard.
+// another admission is in progress; if any live slot was claimed within the last BURST_WINDOW_MS, deny
+// this one. Slots 1..min are claimed without the guard.
+const BURST_WINDOW_MS = 20000; // above the floor: one admission per 20 s
+
 function burstGuardOk(now) {
   const lock = path.join(slotDir(), "admit.lock");
   let released;
@@ -831,7 +844,7 @@ function burstGuardOk(now) {
     return false; // lock held: treat as a concurrent recent admission
   }
   try {
-    const cutoff = now - 60000;
+    const cutoff = now - BURST_WINDOW_MS;
     let names;
     try { names = fs.readdirSync(slotDir()); } catch { return true; }
     for (const n of names) {
