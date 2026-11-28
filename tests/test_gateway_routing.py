@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 import time as _time
 from unittest.mock import MagicMock
 
@@ -97,6 +98,9 @@ def _client_for(monkeypatch, settings_obj, handler, go_key=GO_KEY, usage_path=No
         monkeypatch.delenv("OPENCODE_GO_KEY", raising=False)
     else:
         monkeypatch.setenv("OPENCODE_GO_KEY", go_key)
+    # Tests never read a real NVIDIA_API_KEY from the environment; opt in
+    # explicitly in the precedence tests below.
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
     if db_path is None:
         monkeypatch.delenv("OPENCODE_DB", raising=False)
     else:
@@ -250,6 +254,22 @@ def _split_handler(go_handler, nvidia_handler):
         return go_handler(request)
 
     return handler
+
+
+def _write_nvidia_credential_db(path, key):
+    """Write a temp credential db with one active ``nvidia`` row holding ``key``."""
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS credential (integration_id TEXT, active INTEGER, value TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO credential (integration_id, active, value) VALUES (?, ?, ?)",
+            ("nvidia", 1, json.dumps({"key": key})),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # -- bar 1: plan_route table tests --------------------------------------------
@@ -844,12 +864,14 @@ def test_pace_over_no_fallback_429(monkeypatch, tmp_path):
         monkeypatch,
         _settings(nvidia_api_key=""),
         handler,
+        db_path=str(tmp_path / "nope-nvidia.db"),
         usage_path=_write_snapshot(tmp_path, weekly=_window(pct=95)),
     )
     resp = client.post("/gw/v1/messages", json=_msg_body(model="kimi-k3"), headers=AUTH)
     assert resp.status_code == 429
     assert resp.json()["error"]["type"] == "rate_limit_error"
     assert resp.headers["x-should-retry"] == "false"
+    assert resp.headers["x-frood-route"] == "none"
     assert seen == []
 
 
@@ -900,14 +922,19 @@ def test_routes_table_and_state(monkeypatch, tmp_path):
     assert NVIDIA_KEY not in resp.text
 
 
-def test_models_lists_nvidia_only_with_key(monkeypatch):
+def test_models_lists_nvidia_only_with_key(monkeypatch, tmp_path):
     """GW-T3-08b: Nvidia ids appear in /gw/v1/models only when the key is set."""
     client = _client_for(monkeypatch, _settings(), _nvidia_stream_handler([]))
     ids = [m["id"] for m in client.get("/gw/v1/models", headers=AUTH).json()["data"]]
     assert NV_UPSTREAM in ids and QWEN_UPSTREAM in ids
     assert "deepseek-v4.1-flash" in ids
 
-    client = _client_for(monkeypatch, _settings(nvidia_api_key=""), _nvidia_stream_handler([]))
+    client = _client_for(
+        monkeypatch,
+        _settings(nvidia_api_key=""),
+        _nvidia_stream_handler([]),
+        db_path=str(tmp_path / "nope-nvidia.db"),
+    )
     ids = [m["id"] for m in client.get("/gw/v1/models", headers=AUTH).json()["data"]]
     assert NV_UPSTREAM not in ids and QWEN_UPSTREAM not in ids
     assert "deepseek-v4.1-flash" in ids
@@ -961,3 +988,310 @@ def test_no_secrets_in_logs_routing(monkeypatch, tmp_path, caplog):
         for secret in (GO_KEY, TOKEN, NVIDIA_KEY):
             assert secret not in text, record
             assert secret not in args_text, record
+
+
+# -- bar 10: Nvidia key source (configured > env NVIDIA_API_KEY > credential db) --
+
+
+def test_nvidia_key_from_sqlite_db(monkeypatch, tmp_path, caplog):
+    """Bar 1: no configured/env key, temp db with active nvidia row => serves; mock sees Bearer <fake>.
+
+    The resolved key is never logged (DEBUG caplog).
+    """
+    seen: list[httpx.Request] = []
+    db = tmp_path / "opencode.db"
+    _write_nvidia_credential_db(db, "nv-db-key-111")
+    gw_module._go_key_cache.clear()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            json=_nvidia_json_payload(),
+        )
+
+    client = _client_for(
+        monkeypatch,
+        _settings(nvidia_api_key=""),
+        handler,
+        go_key=None,
+        db_path=db,
+        usage_path=str(tmp_path / "missing.jsonl"),
+    )
+    with caplog.at_level(logging.DEBUG):
+        resp = client.post("/gw/v1/messages", json=_msg_body(model=NV_UPSTREAM), headers=AUTH)
+    assert resp.status_code == 200
+    assert resp.headers["x-frood-route"] == f"nvidia:{NV_UPSTREAM}"
+    assert len(seen) == 1
+    assert seen[0].headers["authorization"] == "Bearer nv-db-key-111"
+    assert "x-opencode-session" not in seen[0].headers
+    for record in caplog.records:
+        text = record.getMessage()
+        try:
+            args_text = str(record.args)
+        except Exception:
+            args_text = ""
+        assert "nv-db-key-111" not in text and "nv-db-key-111" not in args_text
+
+
+def test_nvidia_key_precedence(monkeypatch, tmp_path):
+    """Bar 2: configured key beats env, env beats db."""
+    db = tmp_path / "opencode.db"
+    _write_nvidia_credential_db(db, "nv-db-key-111")
+
+    def post_nvidia(client, seen):
+        client.post("/gw/v1/messages", json=_msg_body(model=NV_UPSTREAM), headers=AUTH)
+        return seen[0].headers["authorization"]
+
+    # 1. configured key wins over env (and db).
+    seen: list[httpx.Request] = []
+    client = _client_for(
+        monkeypatch,
+        _settings(nvidia_api_key=NVIDIA_KEY),
+        _nvidia_stream_handler(seen),
+        go_key=None,
+        db_path=db,
+        usage_path=str(tmp_path / "missing.jsonl"),
+    )
+    monkeypatch.setenv("NVIDIA_API_KEY", "nv-env-key-222")
+    assert post_nvidia(client, seen) == f"Bearer {NVIDIA_KEY}"
+
+    # 2. env wins over db (no configured key). _client_for delenvs NVIDIA_API_KEY,
+    # so re-set it after building the client.
+    seen = []
+    client = _client_for(
+        monkeypatch,
+        _settings(nvidia_api_key=""),
+        _nvidia_stream_handler(seen),
+        go_key=None,
+        db_path=db,
+        usage_path=str(tmp_path / "missing.jsonl"),
+    )
+    monkeypatch.setenv("NVIDIA_API_KEY", "nv-env-key-222")
+    assert post_nvidia(client, seen) == "Bearer nv-env-key-222"
+
+    # 3. db only (no configured key, no env).
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    seen = []
+    client = _client_for(
+        monkeypatch,
+        _settings(nvidia_api_key=""),
+        _nvidia_stream_handler(seen),
+        go_key=None,
+        db_path=db,
+        usage_path=str(tmp_path / "missing.jsonl"),
+    )
+    assert post_nvidia(client, seen) == "Bearer nv-db-key-111"
+
+
+def test_nvidia_key_missing_bad_db_no_candidates(monkeypatch, tmp_path, caplog):
+    """Bar 3: missing db / missing row / bad JSON => no Nvidia candidates, no crash, no key logged."""
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    seen: list[httpx.Request] = []
+
+    def nvidia_handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        raise AssertionError("Nvidia must not be called without a key")
+
+    def client_for_db(db_path):
+        return _client_for(
+            monkeypatch,
+            _settings(nvidia_api_key=""),
+            nvidia_handler,
+            go_key=None,
+            db_path=db_path,
+            usage_path=str(tmp_path / "missing.jsonl"),
+        )
+
+    # 1. missing db.
+    gw_module._go_key_cache.clear()
+    client = client_for_db(str(tmp_path / "nope.db"))
+    resp = client.post("/gw/v1/messages", json=_msg_body(model=NV_UPSTREAM), headers=AUTH)
+    assert resp.status_code == 503
+    assert resp.json()["error"]["message"] == "gateway: no NVIDIA_API_KEY"
+    assert resp.headers["x-frood-route"] == "none"
+
+    # 2. bad JSON value for the nvidia row.
+    db = tmp_path / "opencode.db"
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute("CREATE TABLE credential (integration_id TEXT, active INTEGER, value TEXT)")
+        conn.execute(
+            "INSERT INTO credential (integration_id, active, value) VALUES (?, ?, ?)",
+            ("nvidia", 1, "{not json"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    gw_module._go_key_cache.clear()
+    client = client_for_db(db)
+    resp = client.post("/gw/v1/messages", json=_msg_body(model=NV_UPSTREAM), headers=AUTH)
+    assert resp.status_code == 503
+    assert resp.headers["x-frood-route"] == "none"
+
+    # 3. row present but key missing / non-str.
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "UPDATE credential SET value=? WHERE integration_id=?",
+            (json.dumps({"other": 1}), "nvidia"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    gw_module._go_key_cache.clear()
+    client = client_for_db(db)
+    resp = client.post("/gw/v1/messages", json=_msg_body(model=NV_UPSTREAM), headers=AUTH)
+    assert resp.status_code == 503
+    assert resp.headers["x-frood-route"] == "none"
+
+    assert seen == []
+    for record in caplog.records:
+        text = record.getMessage()
+        try:
+            args_text = str(record.args)
+        except Exception:
+            args_text = ""
+        assert NVIDIA_KEY not in text and NVIDIA_KEY not in args_text
+
+
+def test_models_lists_nvidia_lazily_from_db(monkeypatch, tmp_path):
+    """Bar 4: /gw/v1/models lists Nvidia ids once the db key exists, no router rebuild."""
+    seen: list[httpx.Request] = []
+    db = tmp_path / "opencode.db"
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute("CREATE TABLE credential (integration_id TEXT, active INTEGER, value TEXT)")
+        conn.commit()
+    finally:
+        conn.close()
+    gw_module._go_key_cache.clear()
+    client = _client_for(
+        monkeypatch,
+        _settings(nvidia_api_key=""),
+        _nvidia_stream_handler(seen),
+        go_key=None,
+        db_path=db,
+        usage_path=str(tmp_path / "missing.jsonl"),
+    )
+    ids = [m["id"] for m in client.get("/gw/v1/models", headers=AUTH).json()["data"]]
+    assert NV_UPSTREAM not in ids and QWEN_UPSTREAM not in ids
+
+    # Same router (no rebuild): add the row, clear the per-process cache, lazy
+    # resolution picks it up on the next request.
+    _write_nvidia_credential_db(db, "nv-db-key-111")
+    gw_module._go_key_cache.clear()
+    ids = [m["id"] for m in client.get("/gw/v1/models", headers=AUTH).json()["data"]]
+    assert NV_UPSTREAM in ids and QWEN_UPSTREAM in ids
+
+
+# -- gw-t3 carry-overs (critic r2 / senior r2) ---------------------------------
+
+
+def test_nvidia_read_error_502(monkeypatch, tmp_path):
+    """(a) Nvidia aread() failure => 502 "upstream error body unreadable"."""
+    seen: list[httpx.Request] = []
+
+    async def _unreadable():
+        raise httpx.ReadError("unreadable")
+        yield b""  # pragma: no cover - makes content an async generator
+
+    def nvidia_handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            500,
+            headers={"content-type": "application/json"},
+            content=_unreadable(),
+        )
+
+    client = _client_for(
+        monkeypatch,
+        _settings(),
+        nvidia_handler,
+        usage_path=str(tmp_path / "missing.jsonl"),
+    )
+    resp = client.post(
+        "/gw/v1/messages", json=_msg_body(model=NV_UPSTREAM, stream=True), headers=AUTH
+    )
+    assert resp.status_code == 502
+    assert "upstream error body unreadable" in resp.json()["error"]["message"]
+    assert "integrate.api.nvidia.com" in resp.text
+    assert resp.headers["x-frood-route"] == f"nvidia:{NV_UPSTREAM}"
+    assert len(seen) == 1
+
+
+def test_pre_route_refusals_carry_route_none(monkeypatch, tmp_path):
+    """(b) claude 403, unknown 404, pace-over 429, no-key 503 => x-frood-route: none."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        raise AssertionError("no upstream may be called for a pre-route refusal")
+
+    # claude 403.
+    client = _client_for(
+        monkeypatch,
+        _settings(gateway_go_models="claude-sonnet-4-6," + GO_MODELS),
+        handler,
+    )
+    resp = client.post("/gw/v1/messages", json=_msg_body(model="claude-sonnet-4-6"), headers=AUTH)
+    assert resp.status_code == 403
+    assert resp.headers["x-frood-route"] == "none"
+
+    # unknown 404.
+    client = _client_for(monkeypatch, _settings(), handler)
+    resp = client.post("/gw/v1/messages", json=_msg_body(model="gpt-zzz"), headers=AUTH)
+    assert resp.status_code == 404
+    assert resp.headers["x-frood-route"] == "none"
+
+    # pace-over 429 (no Nvidia key => no fallback).
+    client = _client_for(
+        monkeypatch,
+        _settings(nvidia_api_key=""),
+        handler,
+        db_path=str(tmp_path / "nope-nvidia.db"),
+        usage_path=_write_snapshot(tmp_path, weekly=_window(pct=95)),
+    )
+    resp = client.post("/gw/v1/messages", json=_msg_body(model="kimi-k3"), headers=AUTH)
+    assert resp.status_code == 429
+    assert resp.headers["x-frood-route"] == "none"
+
+    # no-key 503 (nvidia id, no key anywhere).
+    client = _client_for(
+        monkeypatch,
+        _settings(nvidia_api_key=""),
+        handler,
+        db_path=str(tmp_path / "nope-nvidia.db"),
+    )
+    resp = client.post("/gw/v1/messages", json=_msg_body(model=NV_UPSTREAM), headers=AUTH)
+    assert resp.status_code == 503
+    assert resp.headers["x-frood-route"] == "none"
+
+    assert seen == []
+
+
+def test_no_fallback_log_when_last_candidate_fails(monkeypatch, tmp_path, caplog):
+    """(c) when the last (only) candidate fails, no "gateway fallback" INFO line is written."""
+    go_seen: list[httpx.Request] = []
+
+    def go_handler(request: httpx.Request) -> httpx.Response:
+        go_seen.append(request)
+        return httpx.Response(
+            400,
+            headers={"content-type": "application/json"},
+            json={"type": "error", "error": {"type": "invalid_request_error", "message": "bad"}},
+        )
+
+    client = _client_for(
+        monkeypatch,
+        _settings(gateway_go_fallback=""),
+        _split_handler(go_handler, _nvidia_stream_handler([])),
+        usage_path=str(tmp_path / "missing.jsonl"),
+    )
+    with caplog.at_level(logging.INFO, logger="frood.gateway"):
+        resp = client.post("/gw/v1/messages", json=_msg_body(model="kimi-k3"), headers=AUTH)
+    assert resp.status_code == 400
+    assert len(go_seen) == 1
+    fallbacks = [r for r in caplog.records if "gateway fallback" in r.getMessage()]
+    assert fallbacks == []
