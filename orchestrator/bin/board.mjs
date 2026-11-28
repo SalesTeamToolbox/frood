@@ -26,7 +26,7 @@
 //                       (--critic-receipt <path> | --native-critic sonnet|haiku|opus)
 //   signoff <id> --by critic|senior|human [--owner <s>]
 //   signoff <id> --by senior --owner <s> --findings <path> (--receipt <path> | --native <alias>)
-//   gates <id> --owner        |   ready <id> --owner  [--senior-skip "<reason>"]
+//   gates <id> --owner <s>       |   ready <id> --owner <s> [--senior-skip "<reason>"]
 //                             (accepted only when every senior reason starts with `critic:`)
 //   verify <id> --sha <sha>      |   shipped <id> --sha <sha>
 //   reopen <id> --owner <s> --harness claude|opencode --note <why> [--worktree <path>]
