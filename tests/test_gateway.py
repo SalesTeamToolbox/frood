@@ -25,6 +25,10 @@ DB_KEY = "go-key-from-sqlite-db"
 MODELS = "deepseek-v4.1-flash,glm-5.3-flash"
 BASE_URL = "https://opencode.ai/zen/go/v1"
 
+# Tests never read the real opencode credential db: a missing temp db forces
+# every key reader (Go and Nvidia) to resolve to None unless a test pins one.
+_MISSING_DB = "/tmp/opencode/gateway-test-missing.db"
+
 AUTH_BEARER = {"Authorization": f"Bearer {TOKEN}"}
 AUTH_KEY = {"x-api-key": TOKEN}
 
@@ -87,8 +91,9 @@ def _client_for(
         monkeypatch.delenv("OPENCODE_GO_KEY", raising=False)
     else:
         monkeypatch.setenv("OPENCODE_GO_KEY", go_key)
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
     if db_path is None:
-        monkeypatch.delenv("OPENCODE_DB", raising=False)
+        monkeypatch.setenv("OPENCODE_DB", _MISSING_DB)
     else:
         monkeypatch.setenv("OPENCODE_DB", str(db_path))
     gw_module._go_key_cache.clear()

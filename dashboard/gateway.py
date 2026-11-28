@@ -72,15 +72,18 @@ LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 _ANTHROPIC_VERSION_DEFAULT = "2023-06-01"
 
 # Hosts the key reader consults; mirrors orchestrator/bin/go-usage.mjs.
-_CREDENTIAL_SQL = (
-    "SELECT value FROM credential WHERE integration_id = 'opencode-go' AND active = 1 LIMIT 1"
-)
+_CREDENTIAL_SQL = "SELECT value FROM credential WHERE integration_id = ? AND active = 1 LIMIT 1"
 
 # Once-per-process record of hosts already warned about (critical log fires once).
 _crit_logged_hosts: set[str] = set()
 
-# Go-key cache keyed by resolved db path (env-provided keys are never cached).
-_go_key_cache: dict[str, str] = {}
+# Credential keys resolved from the opencode credential db, cached per
+# (integration_id, resolved db path); env-provided keys are never cached.
+_key_cache: dict[tuple[str, str], str] = {}
+
+# Backward-compatible name: tests clear gw_module._go_key_cache between runs;
+# it aliases _key_cache so a single clear() resets both readers.
+_go_key_cache = _key_cache
 
 
 def _as_str(value: object, default: str = "") -> str:
@@ -465,18 +468,17 @@ def resolve_opencode_db_path(explicit: str | Path | None = None) -> Path:
     return Path(xdg) / "opencode" / "opencode.db"
 
 
-def read_go_key_sync(db_path: str | Path | None = None) -> str | None:
-    """Return the OpenCode Go key, or None when unavailable.
+def read_opencode_key_sync(integration_id: str, db_path: str | Path | None = None) -> str | None:
+    """Read-only sqlite read of the active credential row for ``integration_id``.
 
-    ``OPENCODE_GO_KEY`` wins; else a read-only sqlite read of the active
-    ``opencode-go`` credential row. Any error gives None. Never raises, never
-    logs key material. Successful db reads are cached per resolved db path.
+    Returns ``json.loads(value)["key"]`` or None on any error (missing db,
+    missing row, bad JSON, non-str or empty key). Successful reads are cached
+    per (integration_id, resolved db path). Never raises and never logs key
+    material; env vars are read by the caller's wrapper.
     """
-    from_env = os.environ.get("OPENCODE_GO_KEY", "")
-    if from_env:
-        return from_env
     resolved = str(resolve_opencode_db_path(db_path))
-    cached = _go_key_cache.get(resolved)
+    cache_key = (integration_id, resolved)
+    cached = _key_cache.get(cache_key)
     if cached:
         return cached
     try:
@@ -489,7 +491,7 @@ def read_go_key_sync(db_path: str | Path | None = None) -> str | None:
         except Exception:
             pass
         try:
-            row = conn.execute(_CREDENTIAL_SQL).fetchone()
+            row = conn.execute(_CREDENTIAL_SQL, (integration_id,)).fetchone()
         except Exception:
             return None
         if not row or not isinstance(row[0], str):
@@ -501,7 +503,7 @@ def read_go_key_sync(db_path: str | Path | None = None) -> str | None:
         key = parsed.get("key") if isinstance(parsed, dict) else None
         if not isinstance(key, str) or not key:
             return None
-        _go_key_cache[resolved] = key
+        _key_cache[cache_key] = key
         return key
     finally:
         try:
@@ -510,9 +512,42 @@ def read_go_key_sync(db_path: str | Path | None = None) -> str | None:
             pass
 
 
+def read_go_key_sync(db_path: str | Path | None = None) -> str | None:
+    """Return the OpenCode Go key, or None when unavailable.
+
+    ``OPENCODE_GO_KEY`` wins; else a read-only sqlite read of the active
+    ``opencode-go`` credential row. Any error gives None. Never raises, never
+    logs key material. Successful db reads are cached per resolved db path.
+    """
+    from_env = os.environ.get("OPENCODE_GO_KEY", "")
+    if from_env:
+        return from_env
+    return read_opencode_key_sync("opencode-go", db_path)
+
+
+def read_nvidia_key_sync(db_path: str | Path | None = None) -> str | None:
+    """Return the Nvidia key, or None when unavailable.
+
+    ``NVIDIA_API_KEY`` wins; else a read-only sqlite read of the active
+    ``nvidia`` credential row
+    (``integration_id = 'nvidia' AND active = 1``,
+    ``json.loads(value)["key"]``). Any error gives None. Never raises, never
+    logs key material. Successful db reads are cached per resolved db path.
+    """
+    from_env = os.environ.get("NVIDIA_API_KEY", "")
+    if from_env:
+        return from_env
+    return read_opencode_key_sync("nvidia", db_path)
+
+
 async def read_go_key(db_path: str | Path | None = None) -> str | None:
     """Async wrapper: the (possibly blocking) sqlite read runs in a thread."""
     return await asyncio.to_thread(read_go_key_sync, db_path)
+
+
+async def read_nvidia_key(db_path: str | Path | None = None) -> str | None:
+    """Async wrapper: the (possibly blocking) sqlite read runs in a thread."""
+    return await asyncio.to_thread(read_nvidia_key_sync, db_path)
 
 
 def _upstream_host(base_url: str) -> str:
@@ -659,7 +694,7 @@ def build_gateway_router(
         headers.update(filter_anthropic_beta(request.headers.get("anthropic-beta")))
         return headers
 
-    def _nvidia_headers() -> dict[str, str]:
+    def _nvidia_headers(nvidia_key: str) -> dict[str, str]:
         """Headers for the Nvidia OpenAI-compatible endpoint.
 
         Separate from _upstream_headers on purpose: no Go key, no
@@ -669,7 +704,7 @@ def build_gateway_router(
             "content-type": "application/json",
             "accept": "application/json",
             "accept-encoding": "identity",
-            "authorization": f"Bearer {nvidia_key_str}",
+            "authorization": f"Bearer {nvidia_key}",
             "user-agent": f"frood-gateway/{version}",
         }
 
@@ -842,11 +877,12 @@ def build_gateway_router(
         body: dict,
         stream: bool,
         client: httpx.AsyncClient,
+        nvidia_key: str,
     ) -> tuple[str, object, object]:
         """Try the Nvidia candidate once (same contract as _attempt_go)."""
         openai_body, warnings = anthropic_to_openai(body, candidate_upstream)
         logger.debug("gateway nvidia translation warnings=%d", len(warnings))
-        headers = _nvidia_headers()
+        headers = _nvidia_headers(nvidia_key)
         url = nvidia_base + "/chat/completions"
         host = _upstream_host(nvidia_base)
         if stream:
@@ -972,13 +1008,27 @@ def build_gateway_router(
         if not isinstance(model_id, str) or not model_id:
             return error_response(400, "invalid_request_error", "gateway: missing model")
         go_state = await asyncio.to_thread(read_go_state, usage_path, pace_max, time.time())
-        candidates, plan_error = plan_route(model_id, tables, go_state)
+        # Resolve the Nvidia key lazily at request time, once, then cached:
+        # configured value (build-time) > env NVIDIA_API_KEY > credential db
+        # row ``integration_id = 'nvidia' AND active = 1``. Never logged.
+        nvidia_configured = tables.nvidia_key if isinstance(tables.nvidia_key, str) else ""
+        effective_nvidia_key = nvidia_configured or await read_nvidia_key(db_path)
+        keyed = RouteTables(
+            go=tables.go,
+            nvidia=tables.nvidia,
+            fallback=tables.fallback,
+            nvidia_key=effective_nvidia_key or "",
+        )
+        candidates, plan_error = plan_route(model_id, keyed, go_state)
         if plan_error is not None:
+            # Pre-route refusals name no provider or upstream.
+            headers = dict(plan_error.headers or {})
+            headers["x-frood-route"] = "none"
             return error_response(
                 plan_error.status,
                 plan_error.kind,
                 plan_error.message,
-                headers=plan_error.headers or None,
+                headers=headers,
             )
         go_key: str | None = None
         if any(provider == "go" for provider, _ in candidates):
@@ -995,10 +1045,17 @@ def build_gateway_router(
         session_id = derive_session_id(body, request.headers.get("x-claude-code-session-id"))
         client = _get_client()
         pending = list(candidates)
+        nvidia_key = effective_nvidia_key or ""
         while pending:
             provider, candidate_upstream = pending.pop(0)
             if provider == "go":
-                assert go_key is not None
+                if go_key is None:
+                    # Defensive: never assert here; drop a keyless Go candidate
+                    # and try the next (or refuse when none remains).
+                    if pending:
+                        logger.info("gateway fallback provider=go status=missing-key")
+                        continue
+                    return error_response(503, "api_error", "gateway: no OpenCode Go key")
                 out_body = dict(body)
                 out_body["model"] = candidate_upstream
                 kind, first, second = await _attempt_go(
@@ -1011,7 +1068,7 @@ def build_gateway_router(
                 )
             else:
                 kind, first, second = await _attempt_nvidia(
-                    model_id, candidate_upstream, body, stream, client
+                    model_id, candidate_upstream, body, stream, client, nvidia_key
                 )
             if kind == "response":
                 return _with_route(first, provider, candidate_upstream)  # type: ignore[return-value]
@@ -1034,7 +1091,10 @@ def build_gateway_router(
         if denied is not None:
             return denied
         listed = list(routed_models)
-        if nvidia_key_str:
+        effective = tables.nvidia_key if isinstance(tables.nvidia_key, str) else ""
+        if not effective:
+            effective = await read_nvidia_key(db_path) or ""
+        if effective:
             listed.extend(nvidia_id for nvidia_id in nvidia_routed if nvidia_id not in listed)
         data = [
             {
@@ -1059,10 +1119,19 @@ def build_gateway_router(
         if denied is not None:
             return denied
         go_state = await asyncio.to_thread(read_go_state, usage_path, pace_max, time.time())
+        effective = tables.nvidia_key if isinstance(tables.nvidia_key, str) else ""
+        if not effective:
+            effective = await read_nvidia_key(db_path) or ""
+        keyed = RouteTables(
+            go=tables.go,
+            nvidia=tables.nvidia,
+            fallback=tables.fallback,
+            nvidia_key=effective,
+        )
         # The table only: no keys, no tokens, no other secrets.
         return JSONResponse(
             status_code=200,
-            content={"go_state": go_state, "routes": build_route_view(tables)},
+            content={"go_state": go_state, "routes": build_route_view(keyed)},
         )
 
     return router
