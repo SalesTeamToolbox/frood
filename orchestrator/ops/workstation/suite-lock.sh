@@ -79,12 +79,12 @@ _suite_lock_first() {  # oldest ticket; the glob expands sorted and tickets star
 }
 
 # JSON-escape a value for embedding in a JSON string: backslash, double quote
-# and control characters become a space. Pure bash + sed, no jq/node/python.
+# and control characters become a space. Pure bash + tr/sed, no jq/node/python.
 _suite_lock_json_escape() {
   local s="$1"
   s="${s//\\/ }"     # backslash -> space
   s="${s//\"/ }"     # double quote -> space
-  s="$(printf '%s' "$s" | sed 's/[\x00-\x1f\x7f]/ /g')"
+  s="$(printf '%s' "$s" | tr '[:cntrl:]' ' ')"
   printf '%s' "$s"
 }
 
@@ -97,14 +97,15 @@ _suite_lock_json_escape() {
 _suite_lock_history() {
   local event="$1"
   shift
-  local f="${SUITE_LOCK_DIR:-}/history.jsonl" now size esc what_escaped k v extras=""
+  local f="${SUITE_LOCK_DIR:-}/history.jsonl" now size what_escaped k v extras=""
   [ -n "$SUITE_LOCK_DIR" ] || return 0
+  [ -d "$SUITE_LOCK_DIR" ] || return 0        # skip silently when the dir does not exist yet
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo 0)"
   # rotation before append
   if [ -e "$f" ]; then
     size="$(stat -c %s "$f" 2>/dev/null || echo 0)"
     if [ "${size:-0}" -gt 1048576 ]; then
-      mv "$f" "$f.1" 2>/dev/null || true
+      { mv "$f" "$f.1"; } 2>/dev/null || true
     fi
   fi
   # build extra JSON fields; integer values are emitted unquoted.
@@ -120,7 +121,7 @@ _suite_lock_history() {
   what_escaped="$(_suite_lock_json_escape "${SUITE_LOCK_HISTORY_WHAT:-}")"
   local sep=""
   [ -n "$extras" ] && sep=","
-  printf '%s\n' "{\"at\":\"${now}\",\"event\":\"${event}\",\"pid\":$$,\"what\":\"${what_escaped}\"${sep}${extras}}" >> "$f" 2>/dev/null || true
+  { printf '%s\n' "{\"at\":\"${now}\",\"event\":\"${event}\",\"pid\":$$,\"what\":\"${what_escaped}\"${sep}${extras}}" >> "$f"; } 2>/dev/null || true
 }
 
 suite_lock_acquire() {  # $1 = one line saying what is about to run, shown to anyone waiting behind it
@@ -309,7 +310,7 @@ suite_lock_release() {
   # (the safe side: at worst the next waiter clears it after the stale window, instead of two suites
   # running at once).
   if [ "$SUITE_LOCK_HELD" = "1" ] && [ -n "$SUITE_LOCK_DIR" ]; then
-    local held="$SUITE_LOCK_DIR/held" cur="" i held_s outcome
+    local held="$SUITE_LOCK_DIR/held" cur="" i held_s outcome=gone
     held_s=$(( $(date +%s) - ${SUITE_LOCK_SINCE:-0} ))
     [ "$held_s" -lt 0 ] && held_s=0
     for i in 1 2 3; do

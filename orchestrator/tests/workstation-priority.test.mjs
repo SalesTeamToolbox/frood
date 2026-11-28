@@ -5,7 +5,7 @@ import os from "os";
 import path from "path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
-import { runPass, writePassLog, realSetPriority, spikeSample } from "../ops/workstation/agent-priority.mjs";
+import { runPass, writePassLog, realSetPriority, spikeSample, readProc, ticksOf } from "../ops/workstation/agent-priority.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WORKSTATION = path.join(HERE, "..", "ops", "workstation");
@@ -180,6 +180,32 @@ test("runPass never throws on a proc root it cannot read", () => {
   const res = runPass({ procRoot: "/definitely/does/not/exist", setPriority: (t, v) => calls.push([t, v]), uid: ME });
   assert.equal(res.lowered, 0);
   assert.deepEqual(calls, []);
+});
+
+test("readProc: ticks and rssKiB from stat/status fields", () => {
+  const root = tmp();
+  // stat field 14=utime=1234 (rest[11]), field 15=stime=5678 (rest[12]) -> ticks=6912; status VmRSS: 20480 kB -> 20 MiB
+  const dir = path.join(root, "777");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "stat"), `777 (foo) S 1 2 3 4 5 6 7 8 9 10 1234 5678 9 10 11 12 0 0 0 0 0 0 0 0 0 0 0`);
+  fs.writeFileSync(path.join(dir, "cmdline"), "foo\0");
+  fs.writeFileSync(path.join(dir, "status"), `Uid:\t1000\t1000\t1000\t1000\nVmRSS:\t20480 kB\n`);
+  const p = readProc(root, "777");
+  assert.ok(p, "readProc should return a proc entry");
+  assert.equal(p.ticks, 6912, "ticks = utime+stime = 1234+5678");
+  assert.equal(p.rssKiB, 20480, "rssKiB from VmRSS");
+  assert.equal(Math.round(p.rssKiB / 1024), 20, "20480 KiB -> 20 MiB");
+});
+
+test("ticksOf: pid -> number map from procs", () => {
+  const procs = makeProcs([
+    procEntry(1000, { ticks: 100 }),
+    procEntry(1001, { ticks: 200 }),
+  ]);
+  const m = ticksOf(procs);
+  assert.equal(m.get(1000), 100);
+  assert.equal(m.get(1001), 200);
+  assert.equal(m.get(9999), undefined);
 });
 
 // ----------------------------------------------------------- argv regex anchoring
@@ -638,6 +664,7 @@ test("spikeSample: over load1 returns top sorted by cpu", () => {
   });
   assert.ok(s, "should be spiking under load1");
   assert.equal(s.load1, 10);
+  assert.equal(s.load5, 5);
   assert.equal(s.top.length, 3);
   // b: (3000-1000)/100/1*100 = 2000%; a: (2000-1000)/100/1*100 = 1000%; c: (1000-500)/100/1*100 = 500%
   assert.equal(s.top[0].pid, 1001);

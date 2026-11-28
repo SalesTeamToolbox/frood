@@ -89,7 +89,7 @@ function readNice(statText) {
   return Number(rest[16]);
 }
 
-function readProc(procRoot, pidStr) {
+export function readProc(procRoot, pidStr) {
   let stat;
   try {
     stat = fs.readFileSync(path.join(procRoot, pidStr, "stat"), "utf8");
@@ -297,6 +297,7 @@ export function spikeSample({
   clkTck = 100,
 } = {}) {
   const load1 = Number((loadavgText || "").split(/\s+/)[0] || 0);
+  const load5 = Number((loadavgText || "").split(/\s+/)[1] || 0);
   const cpuSomeAvg10 = psiSomeAvg10(psiCpuText);
   const spiking = load1 >= 0.75 * nproc || (cpuSomeAvg10 !== null && cpuSomeAvg10 >= 20);
   if (!spiking || !prevTicks || elapsedMs <= 0) return null;
@@ -305,8 +306,8 @@ export function spikeSample({
   const top = [];
   for (const [pid, p] of procs) {
     const prev = prevTicks.get(pid);
-    const delta = p.ticks - (prev ?? 0);
-    if (delta <= 0) continue;
+    const delta = p.ticks - (Number.isFinite(prev) ? prev : 0);
+    if (!Number.isFinite(delta) || delta <= 0) continue;
     top.push({
       pid,
       comm: p.comm || "",
@@ -320,7 +321,14 @@ export function spikeSample({
   top.sort((a, b) => b.cpu - a.cpu);
   top.length > 8 && (top.length = 8);
   attachAgentRoots(procs, top);
-  return { load1, load5: null, cpuSomeAvg10, top };
+  return { load1, load5, cpuSomeAvg10, top };
+}
+
+// pid -> ticks (utime + stime) from a procs map.
+export function ticksOf(procs) {
+  const m = new Map();
+  for (const [pid, p] of procs) m.set(pid, p.ticks);
+  return m;
 }
 
 // Agent root: nearest ancestor (by ppid chain) that isAgentRoot accepts.
@@ -374,7 +382,7 @@ let lastPaused = false;
 let prevTicks = null;
 let prevTs = null;
 
-function doPass() {
+function doPass({ sample = false } = {}) {
   const result = runPass({
     procRoot: defaultProcRoot(),
     setPriority: realSetPriority,
@@ -394,6 +402,11 @@ function doPass() {
     writePassLog(result.lowered, result.eperm, result.errors, result.roots);
   }
   // --- spike sampler (loop only, never --once, never tests) ---
+  if (!sample) {
+    prevTicks = ticksOf(result.procs);
+    prevTs = Date.now();
+    return { paused: false, ...result };
+  }
   try {
     const now = Date.now();
     const elapsedMs = prevTs === null ? null : now - prevTs;
@@ -404,7 +417,7 @@ function doPass() {
     } catch {
       psiCpuText = "";
     }
-    const sample = spikeSample({
+    const spike = spikeSample({
       procs: result.procs,
       prevTicks,
       elapsedMs,
@@ -412,8 +425,7 @@ function doPass() {
       psiCpuText,
       nproc: os.cpus().length,
     });
-    if (sample) {
-      attachAgentRoots(result.procs, sample.top);
+    if (spike) {
       const state = stateDir();
       fs.mkdirSync(state, { recursive: true });
       const spikes = path.join(state, "spikes.jsonl");
@@ -424,15 +436,15 @@ function doPass() {
           // rotation is best-effort
         }
       }
-      for (const entry of sample.top) {
+      for (const entry of spike.top) {
         entry.repo = repoFromCwd(entry.pid);
       }
       fs.appendFileSync(
         spikes,
-        JSON.stringify({ at: new Date().toISOString(), ...sample }) + "\n",
+        JSON.stringify({ at: new Date().toISOString(), ...spike }) + "\n",
       );
     }
-    prevTicks = new Map(result.procs);
+    prevTicks = ticksOf(result.procs);
     prevTs = now;
   } catch {
     // A sampler failure must never break or slow the renice pass.
@@ -469,7 +481,7 @@ async function runLoop() {
   process.on("SIGINT", onSignal);
   try {
     while (!stopping) {
-      doPass();
+      doPass({ sample: true });
       if (stopping) break;
       await sleep(intervalMs());
     }
