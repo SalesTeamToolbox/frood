@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -32,7 +33,7 @@ UNIT_NAME = "frood.service"
 TEMPLATE_PATH = Path(__file__).resolve().parent / "systemd" / "frood.service"
 SYSTEMCTL_TIMEOUT = 30
 
-_PLACEHOLDERS = ("@REPO@", "@PYTHON@", "@PORT@", "@PATH@", "@LOG@")
+_LEFTOVER_RE = re.compile(r"@[A-Z_]+@")
 
 
 def repo_root() -> Path:
@@ -142,20 +143,35 @@ def render_unit(repo: Path | str, python: Path | str, port: int, path: str, log:
         .replace("@PATH@", path)
         .replace("@LOG@", str(log))
     )
-    leftover = [marker for marker in _PLACEHOLDERS if marker in text]
+    leftover = _LEFTOVER_RE.search(text)
     if leftover:
-        raise ValueError(f"unfilled placeholder(s) in rendered unit: {', '.join(leftover)}")
+        raise ValueError(f"unfilled placeholder(s) in rendered unit: {leftover.group(0)}")
     return text
 
 
 def run_systemctl(*args: str) -> subprocess.CompletedProcess[str]:
-    """Run one ``systemctl --user ...`` call with a timeout."""
-    return subprocess.run(
-        [systemctl_bin(), "--user", *args],
-        capture_output=True,
-        text=True,
-        timeout=SYSTEMCTL_TIMEOUT,
-    )
+    """Run one ``systemctl --user ...`` call with a timeout; never raises.
+
+    A missing binary or a hung systemctl becomes a non-zero return code
+    (127 / 124) with the reason on stderr, so every call site reports the
+    failure with its exit code instead of ending in a traceback.
+    """
+    argv = [systemctl_bin(), "--user", *args]
+    try:
+        return subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=SYSTEMCTL_TIMEOUT,
+        )
+    except FileNotFoundError as exc:
+        return subprocess.CompletedProcess(argv, 127, "", f"systemctl not found: {exc}")
+    except OSError as exc:
+        return subprocess.CompletedProcess(argv, 127, "", str(exc))
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            argv, 124, "", f"systemctl timed out after {SYSTEMCTL_TIMEOUT}s"
+        )
 
 
 def query_unit_state(name: str, query: str) -> str:

@@ -1,8 +1,9 @@
 # ops/systemd/frood.service — systemd user unit TEMPLATE for Frood.
 #
 # This file is a template, not a unit: it is filled in by ops/frood_service.py
-# (render_unit), which replaces every @PLACEHOLDER@ (@REPO@, @PYTHON@, @PORT@,
-# @PATH@, @LOG@). Do not copy it into ~/.config/systemd/user by hand.
+# (render_unit), which replaces the REPO, PYTHON, PORT, PATH and LOG markers
+# with the install-time values. Do not copy it into ~/.config/systemd/user
+# by hand.
 #
 # Port note: when the port is already taken, uvicorn exits with code 3, which
 # Restart=on-failure retries 5 times in 300 s (StartLimitIntervalSec/Burst)

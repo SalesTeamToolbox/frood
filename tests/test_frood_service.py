@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import socket
 import stat
 import subprocess
@@ -107,6 +108,7 @@ class TestRenderUnit:
         text = frood_service.render_unit(
             "/opt/frood", "/opt/frood/.venv/bin/python", 8123, "/usr/bin:/bin", "/tmp/x.log"
         )
+        assert re.search(r"@[A-Z_]+@", text) is None, text
         assert "@REPO@" not in text
         assert "@PYTHON@" not in text
         assert "@PORT@" not in text
@@ -252,6 +254,41 @@ class TestUninstall:
         monkeypatch.setenv("FAKE_FAIL_ON", "disable")
         monkeypatch.setenv("FAKE_FAIL_CODE", "5")
         assert frood_service.cmd_uninstall() == 5
+
+
+class TestSystemctlFailures:
+    def test_missing_systemctl_binary_reports_exit_code(
+        self,
+        fake_repo: Path,
+        fake_env: dict[str, Path],
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture,
+    ):
+        monkeypatch.setenv("FROOD_SYSTEMCTL", "/nonexistent-systemctl-xyz")
+        port = free_port()
+        rc = frood_service.cmd_install(fake_repo, port=port)
+        assert rc == 127
+        assert "exit 127" in capsys.readouterr().err
+
+    def test_hung_systemctl_reports_timeout(
+        self,
+        fake_repo: Path,
+        fake_env: dict[str, Path],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture,
+    ):
+        sleeper = tmp_path / "sleepy_systemctl.py"
+        sleeper.write_text(
+            "#!/usr/bin/env python3\nimport time\ntime.sleep(30)\n", encoding="utf-8"
+        )
+        sleeper.chmod(sleeper.stat().st_mode | stat.S_IXUSR)
+        monkeypatch.setenv("FROOD_SYSTEMCTL", str(sleeper))
+        monkeypatch.setattr(frood_service, "SYSTEMCTL_TIMEOUT", 1)
+        port = free_port()
+        rc = frood_service.cmd_install(fake_repo, port=port)
+        assert rc == 124
+        assert "exit 124" in capsys.readouterr().err
 
 
 class TestRefusals:
