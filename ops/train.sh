@@ -14,8 +14,10 @@
 #   b. $main_root/.opencode/board/tickets/<ticket>.json  blast_radius[].test values
 #   c. $main_root/.opencode/reports/<ticket>/mandate.md      ^tests: line
 #   d. none -> exit 1 "test failure" receipt naming every source tried
-# *.py runs under `timeout -k 10 $TRAIN_PYTEST_TIMEOUT python3 -m pytest <file> -q`
-# (default 1200, log pytest.log); *.test.mjs / *.test.js under
+# *.py runs under `timeout -k 10 $TRAIN_PYTEST_TIMEOUT <pytest-python> -m pytest <file> -q`
+# where <pytest-python> is "$repo_root/.venv/bin/python" when executable, else `python3`
+# (venv-first rule; PATH is never changed). (default 1200, log pytest.log);
+# *.test.mjs / *.test.js under
 # `timeout -k 10 $TRAIN_NODE_TIMEOUT node --test <file>` (default 600, log
 # node-test.log). Both logs are emptied at the start of each run, then appended
 # per file. Files run serially, one at a time; the first failure stops
@@ -28,6 +30,14 @@ ticket="${1:?usage: train.sh <ticket>}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
+
+# pytest interpreter: the checkout's own .venv/bin/python when executable,
+# otherwise python3. Picked once here; never exported, PATH never changed.
+if [ -x "$repo_root/.venv/bin/python" ]; then
+  PYTEST_PYTHON="$repo_root/.venv/bin/python"
+else
+  PYTEST_PYTHON="python3"
+fi
 
 REPORTS_ROOT="${FROOD_REPORTS_ROOT:-$HOME/.opencode/reports/frood-public}"
 report_dir="$REPORTS_ROOT/$ticket"
@@ -159,7 +169,8 @@ fi
 # Build the comma-joined receipt value (empty when none).
 tests_csv="$(printf '%s\n' "$tests_list" | paste -sd, -)"
 tests_receipt_lines="tests_source: $tests_source
-tests: $tests_csv"
+tests: $tests_csv
+python: $PYTEST_PYTHON"
 
 # (d) nothing found -> exit 1 naming every source tried.
 if [ "$tests_source" = "none" ]; then
@@ -186,7 +197,7 @@ while IFS= read -r f; do
   [ -z "$f" ] && continue
   case "$f" in
     *.py)
-      if timeout -k 10 "$TRAIN_PYTEST_TIMEOUT" python3 -m pytest "$f" -q >>"$pytest_log" 2>&1; then
+      if timeout -k 10 "$TRAIN_PYTEST_TIMEOUT" "$PYTEST_PYTHON" -m pytest "$f" -q >>"$pytest_log" 2>&1; then
         :
       else
         rc=$?
