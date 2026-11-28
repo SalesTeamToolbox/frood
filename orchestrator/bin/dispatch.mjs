@@ -14,7 +14,10 @@
 //   scope and blast-radius tests and READS the paths named in its blast-radius callers. Two tickets CONFLICT when
 //   both edit a file, or one edits a file the other reads (the same path, a path under the other's directory, or
 //   globs whose literal prefixes nest), or when one depends on the other. Two tickets that only read the same file
-//   do not conflict. It never guesses: overlap means serial.
+//   do not conflict. It never guesses: overlap means serial. Exact shared files named in adapter.json `merge_friendly`
+//   (default `docs/ATLAS.md`) never serialise two tickets that both edit the exact same file — edit-vs-edit only;
+//   edit-vs-read and a glob or directory scope over the file still conflict. A blast-radius test outside the ticket's
+//   scope is run-only: it counts as neither an edit nor a read.
 //   Paths are compared normalised (posix, `..` collapsed, repo/worktree prefix stripped, case-insensitive); an entry
 //   without a `/` (a bare `desk.mjs`) overlaps any path with that last segment.
 //   Output: ordered `groups`; every ticket in a group can run at once, and group N+1 starts only when every ticket
@@ -97,12 +100,17 @@ function normPath(p, roots = []) {
 }
 // A ticket's files in two sets: `edits` (scope and blast-radius tests: what it may change) and `reads` (paths named
 // in blast-radius callers that it does not also edit: what it depends on staying put).
+// A blast-radius `test` counts as an edit only when it overlaps a scope entry; otherwise it is run-only and counts
+// as neither an edit nor a read.
 export function fileSetsOf(t, root = null) {
   const roots = [t.worktree, root];
   const edits = new Set((t.scope ?? []).map((p) => normPath(p, roots)));
   const reads = new Set();
   for (const b of t.blast_radius ?? []) {
-    if (typeof b.test === "string" && b.test) edits.add(normPath(b.test, roots));
+    if (typeof b.test === "string" && b.test) {
+      const tp = normPath(b.test, roots);
+      if ([...edits].some((s) => pathsOverlap(tp, s))) edits.add(tp);
+    }
     for (const m of String(b.caller ?? "").match(PATH_RE) ?? []) reads.add(normPath(m, roots));
   }
   for (const e of edits) reads.delete(e);
@@ -143,15 +151,21 @@ export function pathsOverlap(a, b) {
   return false;
 }
 // The first pair of paths shared by two tickets, or null. THE shared-file check: dispatch never groups on a hit.
-export function sharedFile(fa, fb) {
-  for (const a of fa) for (const b of fb) if (pathsOverlap(a, b)) return a === b ? a : `${a} ~ ${b}`;
+// `skip` (a Set of exact, normalised merge-friendly paths) makes `sharedFile` ignore a pair when both paths are the
+// same exact (non-glob) path and it is in `skip` — the edit-vs-edit check's merge-friendly exemption only.
+export function sharedFile(fa, fb, skip) {
+  for (const a of fa) for (const b of fb) {
+    if (skip && a === b && skip.has(a) && !literal(a).glob) continue;
+    if (pathsOverlap(a, b)) return a === b ? a : `${a} ~ ${b}`;
+  }
   return null;
 }
 // Why tickets A and B may not run at once, or null. Both editing a file conflicts; one editing a file the other
 // calls conflicts (the caller's expectations may break); both only calling the same file does NOT.
-// `a`/`b` are { id, edits, reads }.
-export function overlapOf(a, b) {
-  let f = sharedFile(a.edits, b.edits);
+// `a`/`b` are { id, edits, reads }. `mergeFriendly` (a Set of exact, normalised merge-friendly paths) exempts an
+// edit-vs-edit hit on the same exact file — edit-vs-read is unchanged.
+export function overlapOf(a, b, { mergeFriendly } = {}) {
+  let f = sharedFile(a.edits, b.edits, mergeFriendly);
   if (f) return { kind: "edit", file: f, text: `both edit ${f}` };
   f = sharedFile(a.edits, b.reads);
   if (f) return { kind: "read", file: f, text: `${a.id} edits ${f}, which ${b.id} calls` };
@@ -209,6 +223,18 @@ function resolveArgs(root, args, tickets) {
 // How long an EGM-cleared queued ticket keeps priority over newer overlapping ones (adapter.json
 // `queue_priority_hours`, default 48, 0 = off), so an abandoned queued ticket never blocks anyone forever.
 const DEFAULT_QUEUE_PRIORITY_HOURS = 48;
+// Exact shared files named in adapter.json `merge_friendly` (default `docs/ATLAS.md`) never serialise two
+// tickets that both edit the exact same file — edit-vs-edit only. `[]` turns it off.
+export const DEFAULT_MERGE_FRIENDLY = ["docs/ATLAS.md"];
+const MERGE_FRIENDLY_RE = /[*?[\]{}]/;
+// Exact paths (no wildcard) listed in adapter.json `merge_friendly`, normalised like `fileSetsOf` scope entries.
+function mergeFriendly(root) {
+  const v = readJson(path.join(root, ".opencode", "board", "adapter.json"))?.merge_friendly;
+  if (v === undefined) return new Set(DEFAULT_MERGE_FRIENDLY.map((e) => normPath(e, [root])));
+  if (!Array.isArray(v) || !v.every((e) => typeof e === "string" && e.length > 0)) throw new Usage("adapter.json: merge_friendly must be an array of exact file paths");
+  for (const e of v) if (MERGE_FRIENDLY_RE.test(e)) throw new Usage("adapter.json: merge_friendly must be an array of exact file paths");
+  return new Set(v.map((e) => normPath(e, [root])));
+}
 function queuePriorityHours(root) {
   const v = readJson(path.join(root, ".opencode", "board", "adapter.json"))?.queue_priority_hours;
   if (v === undefined) return DEFAULT_QUEUE_PRIORITY_HOURS;
@@ -226,6 +252,9 @@ export function buildPlan(root, args, { now = Date.now() } = {}) {
   const picked = resolveArgs(root, args, all);
   const inSet = new Set(picked.map((t) => t.id));
   const stageOf = new Map(all.map((t) => [t.id, t.stage]));
+  // Merge-friendly files (adapter `merge_friendly`, default `docs/ATLAS.md`) are read once per plan, like
+  // `queue_priority_hours`, and exempt exact shared edits from the edit-vs-edit check only.
+  const mergeFriendlySet = mergeFriendly(root);
   const info = picked.map((t) => {
     const mandate = fs.existsSync(t.mandate_path ?? "") ? fs.readFileSync(t.mandate_path, "utf8") : "";
     return { id: t.id, stage: t.stage, dispatched: inFlightStage(t), created: createdMs(t), ...fileSetsOf(t, root), depends: dependsOf(mandate).filter((d) => d !== t.id) };
@@ -250,12 +279,12 @@ export function buildPlan(root, args, { now = Date.now() } = {}) {
       continue;
     }
     const ext = i.depends.filter((d) => !inSet.has(d) && stageOf.get(d) !== "shipped" && stageOf.get(d) !== "closed");
-    const busy = inFlight.map((f) => ({ id: f.id, o: overlapOf(i, f) })).filter((f) => f.o);
+    const busy = inFlight.map((f) => ({ id: f.id, o: overlapOf(i, f, { mergeFriendly: mergeFriendlySet }) })).filter((f) => f.o);
     // Only an undispatched queued ticket yields, and only to one queued strictly before it (a ticket without `created`
     // yields to none). Holds point only at strictly older tickets, so they can never form a cycle.
     const first =
       i.stage === "queued" && !i.dispatched && i.created !== null
-        ? waiting.filter((w) => w.created < i.created).map((w) => ({ id: w.id, o: overlapOf(i, w) })).filter((w) => w.o)
+        ? waiting.filter((w) => w.created < i.created).map((w) => ({ id: w.id, o: overlapOf(i, w, { mergeFriendly: mergeFriendlySet }) })).filter((w) => w.o)
         : [];
     if (ext.length || busy.length || first.length) {
       held.push({
@@ -292,7 +321,7 @@ export function buildPlan(root, args, { now = Date.now() } = {}) {
       if (a.depends.includes(b.id)) why = `${a.id} depends on ${b.id}`;
       else if (b.depends.includes(a.id)) why = `${b.id} depends on ${a.id}`;
       else {
-        const o = overlapOf(a, b);
+        const o = overlapOf(a, b, { mergeFriendly: mergeFriendlySet });
         if (o) why = o.kind === "edit" ? `shared file ${o.file}` : o.text;
       }
       if (why) {
