@@ -17,7 +17,7 @@ outside the board itself).
 /frood-board round <id> --owner <session> --worker-receipt <path> --findings <path> --reviewed-sha <sha>
 /frood-board signoff <id> --by critic|senior|human
 /frood-board gates <id> --owner <session>
-/frood-board ready <id> --owner <session>
+/frood-board ready <id> --owner <session> [--senior-skip "<reason>"]
 /frood-board verify <id> --sha <sha>  |  shipped <id> --sha <sha>
 /frood-board --help
 ```
@@ -25,6 +25,7 @@ outside the board itself).
 This runs `node orchestrator/bin/board.mjs <command> [args]` in the ticket
 worktree. `--help` (or `-h`) prints the board's full usage and exits 0; nothing
 is written.
+`--senior-skip` on `ready` overrides only a critic-only senior requirement: every live senior reason must start with `critic:`, the reason must be at least 20 characters, and the override is recorded on the ticket as `senior.skipped` (it never writes a signoff). Guarded-path and counted-rounds reasons still require a paid senior or a human.
 
 Repo root = parent of `git rev-parse --git-common-dir` from `--repo`/cwd, so it
 works from any worktree. Board dir = `<root>/.opencode/board/`.
